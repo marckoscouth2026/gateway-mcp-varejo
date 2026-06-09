@@ -1,0 +1,19 @@
+name: Teste do Webhook
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simular mensagem do Telegram
+        run: |
+          curl -X POST https://gateway-mcp-varejo.onrender.com/telegram/webhook \
+            -H "Content-Type: application/json" \
+            -d '{
+              "message": {
+                "chat": {"id": -5215864386},
+                "text": "/estoque Heineken"
+              }
+            }'
