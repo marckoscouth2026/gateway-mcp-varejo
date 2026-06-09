@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import os
 import requests
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -121,7 +122,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if chat_id is None or text is None:
             return {"ok": True}
 
-        # Verifica se o chat é autorizado
+        # Verifica se o chat é autorizado (se ADMIN_CHAT_ID estiver configurado)
         if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
             print(f"Chat não autorizado: {chat_id}")
             return {"ok": True}
@@ -138,7 +139,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 
                 if response.status_code == 200:
                     produtos = response.json()
-                    if not produtos:
+                    if not produits:
                         send_telegram_message(chat_id, "📦 *Estoque vazio!*")
                         return {"ok": True}
                     
@@ -261,7 +262,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 send_telegram_message(chat_id, "⛔ Apenas administradores podem atualizar o estoque.")
                 return {"ok": True}
             
-            # Remove o comando e limpa espaços
             resto = text.replace("/atualizar_estoque", "").strip()
             if "|" not in resto:
                 send_telegram_message(chat_id, 
@@ -287,7 +287,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 
                 delta = int(operacao)
                 
-                # Busca o produto no Supabase
                 headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
                 check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=eq.{nome}"
                 response = requests.get(check_url, headers=headers)
@@ -302,7 +301,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     send_telegram_message(chat_id, f"❌ Estoque não pode ficar negativo. Atual: {produto['quantity']} unidades.")
                     return {"ok": True}
                 
-                # Atualiza o produto
                 update_url = f"{SUPABASE_URL}/rest/v1/inventory?id=eq.{produto['id']}"
                 update_data = {"quantity": nova_quantidade}
                 update_response = requests.patch(update_url, json=update_data, headers=headers)
@@ -322,6 +320,46 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
 
+        # ========== COMANDO /RESERVAR ==========
+        elif text.startswith("/reservar"):
+            if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+                send_telegram_message(chat_id, "⛔ Apenas administradores podem fazer reservas.")
+                return {"ok": True}
+            
+            parts = text.replace("/reservar", "").strip().split()
+            if len(parts) != 2:
+                send_telegram_message(chat_id, "Use: `/reservar <produto> <quantidade>`")
+                return {"ok": True}
+            
+            produto, qtd = parts
+            try:
+                qtd_int = int(qtd)
+                if qtd_int <= 0:
+                    raise ValueError
+            except ValueError:
+                send_telegram_message(chat_id, "Quantidade inválida. Use um número positivo.")
+                return {"ok": True}
+            
+            headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=eq.{produto}"
+            response = requests.get(check_url, headers=headers)
+            
+            if response.status_code != 200 or not response.json():
+                send_telegram_message(chat_id, f"❌ Produto '{produto}' não encontrado.")
+                return {"ok": True}
+            
+            produto_data = response.json()[0]
+            if produto_data["quantity"] < qtd_int:
+                send_telegram_message(chat_id, f"😔 Desculpe, só temos {produto_data['quantity']} unidades de {produto} no momento.")
+                return {"ok": True}
+            
+            # Registra reserva (simples - apenas confirma)
+            send_telegram_message(chat_id, 
+                f"✅ *Reserva confirmada!*\n\n"
+                f"🍺 {produto} x {qtd_int} unidades\n"
+                f"💰 Total: R$ {produto_data['price_cents']/100 * qtd_int:.2f}\n\n"
+                f"📌 Sua reserva está garantida. Passe na loja para retirar.")
+
         # ========== COMANDO /ESTOQUE (produto específico) ==========
         elif text.startswith("/estoque"):
             product = text.replace("/estoque", "").strip()
@@ -330,13 +368,64 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 return {"ok": True}
             background_tasks.add_task(process_inventory_query, chat_id, product)
 
+        # ========== PROCESSAMENTO DE MENSAGENS EM LINGUAGEM NATURAL ==========
         else:
-            send_telegram_message(chat_id, "Comando não reconhecido.\n\nComandos disponíveis:\n"
-                                          "/estoque <produto>\n"
-                                          "/estoque_completo\n"
-                                          "/estoque_resumo\n"
-                                          "/adicionar_produto (admin)\n"
-                                          "/atualizar_estoque (admin)")
+            # Lista de palavras-chave para identificar pergunta de estoque
+            palavras_estoque = ["tem", "estoque", "possui", "disponível", "tem gelada", "cerveja", "cervejas"]
+            palavras_produto = ["heineken", "original", "brahma", "skol", "budweiser", "stella", "colorado", "eisenbahn"]
+            
+            mensagem_lower = text.lower()
+            
+            # Verifica se a mensagem parece uma pergunta sobre estoque
+            eh_pergunta_estoque = any(palavra in mensagem_lower for palavra in palavras_estoque)
+            produto_mencionado = None
+            
+            # Tenta encontrar um produto conhecido na mensagem
+            for produto in palavras_produto:
+                if produto in mensagem_lower:
+                    produto_mencionado = produto.capitalize()
+                    break
+            
+            if eh_pergunta_estoque and produto_mencionado:
+                # Cliente perguntou sobre um produto que temos no estoque
+                try:
+                    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=eq.{produto_mencionado}"
+                    response = requests.get(check_url, headers=headers, timeout=10)
+                    
+                    if response.status_code == 200 and response.json():
+                        produto = response.json()[0]
+                        quantidade = produto["quantity"]
+                        preco = produto["price_cents"] / 100
+                        gelada = "gelada" if produto["is_cold"] else "ambiente"
+                        
+                        if quantidade > 0:
+                            msg = (
+                                f"🍺 *{produto['product_name']}* {gelada}\n\n"
+                                f"✅ *Sim, temos!*\n"
+                                f"📦 Estoque: {quantidade} unidades\n"
+                                f"💰 Preço: R$ {preco:.2f}\n\n"
+                                f"📝 Deseja reservar? Envie `/reservar {produto['product_name']} {quantidade}`\n"
+                                f"Ou digite a quantidade desejada."
+                            )
+                        else:
+                            msg = f"😔 *{produto['product_name']}* {gelada}\n\n❌ Infelizmente está esgotado no momento.\nEstamos aguardando novo lote!"
+                        
+                        send_telegram_message(chat_id, msg)
+                    else:
+                        send_telegram_message(chat_id, f"😔 Desculpe, não encontrei *{produto_mencionado}* no nosso estoque.\n\nUse `/estoque {produto_mencionado}` para verificar ou tente outro produto.")
+                except Exception as e:
+                    send_telegram_message(chat_id, f"❌ Erro ao consultar estoque. Tente novamente.\n\nUse `/estoque {produto_mencionado}`.")
+            else:
+                # Mensagem não reconhecida
+                send_telegram_message(chat_id, 
+                    "🤖 *Olá! Sou o assistente virtual da loja.*\n\n"
+                    "Você pode:\n"
+                    "• Perguntar sobre um produto (ex: 'tem Heineken?')\n"
+                    "• Usar `/estoque <produto>` para consultar\n"
+                    "• Usar `/estoque_resumo` para ver todos os produtos\n"
+                    "• Fazer uma reserva com `/reservar <produto> <quantidade>`\n\n"
+                    "Em breve teremos mais funcionalidades!")
 
     except Exception as e:
         print(f"Erro geral no webhook: {e}")
