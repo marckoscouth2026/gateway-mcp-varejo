@@ -1,0 +1,22 @@
+name: Teste de Estoque
+
+on:
+  workflow_dispatch:  # Permite executar manualmente
+
+jobs:
+  test-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Testar consulta de estoque - Heineken
+        run: |
+          curl -X POST https://gateway-mcp-varejo.onrender.com/inventory/check \
+            -H "Content-Type: application/json" \
+            -d "{\"product_name\":\"Heineken\",\"secret\":\"${{ secrets.AUTO_APPROVE_SECRET }}\"}" \
+            | jq .
+      
+      - name: Testar consulta de estoque - Produto inexistente
+        run: |
+          curl -X POST https://gateway-mcp-varejo.onrender.com/inventory/check \
+            -H "Content-Type: application/json" \
+            -d "{\"product_name\":\"Coca-Cola\",\"secret\":\"${{ secrets.AUTO_APPROVE_SECRET }}\"}" \
+            | jq .
