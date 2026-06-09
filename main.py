@@ -122,7 +122,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         # Verifica se o chat é autorizado (se ADMIN_CHAT_ID estiver configurado)
-          if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+        if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
             print(f"Chat não autorizado: {chat_id}")
             return {"ok": True}
 
@@ -134,73 +134,140 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 return {"ok": True}
             background_tasks.add_task(process_inventory_query, chat_id, product)
         
+        # ========== COMANDO /ESTOQUE_COMPLETO ==========
+        elif text.startswith("/estoque_completo"):
+            try:
+                headers = {
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"
+                }
+                url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+                response = requests.get(url, headers=headers, timeout=15)
+                
+                if response.status_code == 200:
+                    produtos = response.json()
+                    if not produtos:
+                        send_telegram_message(chat_id, "📦 *Estoque vazio!*")
+                        return {"ok": True}
+                    
+                    msg = "*📦 ESTOQUE COMPLETO*\n\n"
+                    for p in produtos:
+                        gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                        msg += (f"🍺 *{p['product_name']}*\n"
+                               f"   🏷️ {p['brand']} | 📏 {p['volume_ml']}ml\n"
+                               f"   📦 {p['quantity']} un | 💰 R$ {p['price_cents']/100:.2f}\n"
+                               f"   {gelado}\n\n")
+                    
+                    if len(msg) > 4000:
+                        msg = msg[:4000] + "\n\n... (mais produtos)"
+                    
+                    send_telegram_message(chat_id, msg)
+                else:
+                    send_telegram_message(chat_id, f"❌ Erro ao buscar estoque: {response.status_code}")
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
+
+        # ========== COMANDO /ESTOQUE_RESUMO ==========
+        elif text.startswith("/estoque_resumo"):
+            try:
+                headers = {
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"
+                }
+                url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+                response = requests.get(url, headers=headers, timeout=15)
+                
+                if response.status_code == 200:
+                    produtos = response.json()
+                    if not produtos:
+                        send_telegram_message(chat_id, "📦 Estoque vazio.")
+                        return {"ok": True}
+                    
+                    msg = "*📦 RESUMO DO ESTOQUE*\n\n"
+                    for p in produtos:
+                        gelado_emoji = "❄️" if p["is_cold"] else "🌡️"
+                        msg += f"{gelado_emoji} *{p['product_name']}*: {p['quantity']} un\n"
+                    
+                    send_telegram_message(chat_id, msg)
+                else:
+                    send_telegram_message(chat_id, f"❌ Erro ao buscar estoque: {response.status_code}")
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
+
         # ========== COMANDO /ADICIONAR_PRODUTO ==========
-    elif text.startswith("/adicionar_produto"):
-    # Verifica se é administrador
-    if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
-        send_telegram_message(chat_id, "⛔ Apenas administradores podem adicionar produtos.")
-        return {"ok": True}
-    
-    # Remove o comando e separa por pipe, limpando espaços
-    parts_raw = text.replace("/adicionar_produto", "").strip().split("|")
-    # Remove espaços extras de cada parte
-    parts = [p.strip() for p in parts_raw]
-    
-    if len(parts) != 6:
-        send_telegram_message(chat_id, 
-            "📝 *Formato inválido!*\n\n"
-            "Use:\n"
-            "`/adicionar_produto nome|marca|volume|quantidade|preco|gelada`\n\n"
-            "Exemplo:\n"
-            "`/adicionar_produto Heineken|Heineken|350|48|690|true`\n\n"
-            "Não use espaços entre os separadores."
-        )
-        return {"ok": True}
-    
-    nome, marca, volume, quantidade, preco, gelada = parts
-    
-    # Validações
-    try:
-        volume_int = int(volume)
-        quantidade_int = int(quantidade)
-        preco_int = int(preco)
-        gelada_bool = gelada.lower() == "true"
-    except ValueError:
-        send_telegram_message(chat_id, "❌ Erro: Volume, quantidade e preço devem ser números. Preço em centavos (ex: 720 = R$ 7,20).")
-        return {"ok": True}
-    
-    # Insere no Supabase
-    try:
-        headers = {
-            "apikey": SUPABASE_SERVICE_KEY,
-            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "product_name": nome,
-            "brand": marca,
-            "volume_ml": volume_int,
-            "quantity": quantidade_int,
-            "price_cents": preco_int,
-            "is_cold": gelada_bool
-        }
-        url = f"{SUPABASE_URL}/rest/v1/inventory"
-        response = requests.post(url, json=data, headers=headers)
+        elif text.startswith("/adicionar_produto"):
+            # Verifica se é administrador
+            if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+                send_telegram_message(chat_id, "⛔ Apenas administradores podem adicionar produtos.")
+                return {"ok": True}
+            
+            # Remove o comando e separa por pipe, limpando espaços
+            parts_raw = text.replace("/adicionar_produto", "").strip().split("|")
+            parts = [p.strip() for p in parts_raw]
+            
+            if len(parts) != 6:
+                send_telegram_message(chat_id, 
+                    "📝 *Formato inválido!*\n\n"
+                    "Use:\n"
+                    "`/adicionar_produto nome|marca|volume|quantidade|preco|gelada`\n\n"
+                    "Exemplo:\n"
+                    "`/adicionar_produto Heineken|Heineken|350|48|690|true`"
+                )
+                return {"ok": True}
+            
+            nome, marca, volume, quantidade, preco, gelada = parts
+            
+            # Validações
+            try:
+                volume_int = int(volume)
+                quantidade_int = int(quantidade)
+                preco_int = int(preco)
+                gelada_bool = gelada.lower() == "true"
+                if volume_int <= 0 or quantidade_int < 0 or preco_int <= 0:
+                    raise ValueError("Valores inválidos")
+            except ValueError:
+                send_telegram_message(chat_id, "❌ Erro: Volume, quantidade e preço devem ser números positivos. Preço em centavos (ex: 690 = R$ 6,90).")
+                return {"ok": True}
+            
+            # Insere no Supabase
+            try:
+                headers = {
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "product_name": nome,
+                    "brand": marca,
+                    "volume_ml": volume_int,
+                    "quantity": quantidade_int,
+                    "price_cents": preco_int,
+                    "is_cold": gelada_bool
+                }
+                url = f"{SUPABASE_URL}/rest/v1/inventory"
+                response = requests.post(url, json=data, headers=headers)
+                
+                if response.status_code in (200, 201):
+                    send_telegram_message(chat_id, 
+                        f"✅ *Produto adicionado com sucesso!*\n\n"
+                        f"🍺 {nome}\n"
+                        f"🏷️ Marca: {marca}\n"
+                        f"📏 Volume: {volume_int}ml\n"
+                        f"📦 Estoque: {quantidade_int} unidades\n"
+                        f"💰 Preço: R$ {preco_int/100:.2f}\n"
+                        f"🌡️ {'Gelada' if gelada_bool else 'Ambiente'}"
+                    )
+                else:
+                    send_telegram_message(chat_id, f"❌ Erro ao adicionar produto:\n{response.text}")
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
         
-        if response.status_code in (200, 201):
-            send_telegram_message(chat_id, 
-                f"✅ *Produto adicionado com sucesso!*\n\n"
-                f"🍺 {nome}\n"
-                f"🏷️ Marca: {marca}\n"
-                f"📏 Volume: {volume_int}ml\n"
-                f"📦 Estoque: {quantidade_int} unidades\n"
-                f"💰 Preço: R$ {preco_int/100:.2f}\n"
-                f"🌡️ {'Gelada' if gelada_bool else 'Ambiente'}"
-            )
+        # ========== COMANDO NÃO RECONHECIDO ==========
         else:
-            send_telegram_message(chat_id, f"❌ Erro ao adicionar produto:\n{response.text}")
+            send_telegram_message(chat_id, "Comando não reconhecido.\n\nComandos disponíveis:\n/estoque <produto>\n/estoque_completo\n/estoque_resumo\n/adicionar_produto (admin)")
+
     except Exception as e:
-        send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
+        print(f"Erro geral no webhook: {e}")
     
     return {"ok": True}
 
