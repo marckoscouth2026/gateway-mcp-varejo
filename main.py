@@ -28,21 +28,17 @@ class InventoryRequest(BaseModel):
 
 # ========== FUNÇÕES ==========
 def send_telegram_message(chat_id: int, text: str):
-    """Envia mensagem para o Telegram (chamada síncrona, mas rápida)."""
     if not TELEGRAM_BOT_TOKEN:
         print("ERRO: TELEGRAM_BOT_TOKEN não configurado.")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        if response.status_code != 200:
-            print(f"Falha ao enviar mensagem: {response.status_code} - {response.text}")
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
 def query_supabase(table: str, params: dict = None):
-    """Consulta o Supabase (pode ser lenta na primeira vez)."""
     headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     resp = requests.get(url, headers=headers, params=params, timeout=15)
@@ -50,14 +46,7 @@ def query_supabase(table: str, params: dict = None):
     return resp.json()
 
 def process_inventory_query(chat_id: int, product: str):
-    """Processa a consulta de estoque e envia a resposta (executada em segundo plano)."""
     try:
-        # Chama o endpoint local para evitar HTTP
-        if not AUTO_APPROVE_SECRET:
-            send_telegram_message(chat_id, "❌ Erro de configuração: secret não definido.")
-            return
-        
-        # Consulta direta ao Supabase (evita chamada HTTP interna)
         results = query_supabase("inventory", params={"product_name": f"eq.{product}"})
         if not results:
             send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado no estoque.")
@@ -76,9 +65,7 @@ def process_inventory_query(chat_id: int, product: str):
         
         send_telegram_message(chat_id, msg)
     except Exception as e:
-        error_msg = f"❌ Erro ao consultar estoque: {str(e)}"
-        print(error_msg)
-        send_telegram_message(chat_id, error_msg)
+        send_telegram_message(chat_id, f"❌ Erro ao consultar estoque: {str(e)}")
 
 # ========== ENDPOINTS ==========
 @app.get("/")
@@ -115,7 +102,7 @@ async def check_inventory(request: InventoryRequest):
     except Exception as e:
         raise HTTPException(500, f"Erro interno: {str(e)}")
 
-# ========== WEBHOOK DO TELEGRAM (OTIMIZADO) ==========
+# ========== WEBHOOK DO TELEGRAM ==========
 @app.post("/telegram/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -134,28 +121,98 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if chat_id is None or text is None:
             return {"ok": True}
 
-        # Verifica se o chat é autorizado
+        # Verifica se o chat é autorizado (se ADMIN_CHAT_ID estiver configurado)
         if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
-            print(f"Chat não autorizado: {chat_id}. ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
-            # Ainda responde 200 para o Telegram, mas não processa
+            print(f"Chat não autorizado: {chat_id}")
             return {"ok": True}
 
+        # ========== COMANDO /ESTOQUE ==========
         if text.startswith("/estoque"):
             product = text.replace("/estoque", "").strip()
             if not product:
-                # Envia resposta rápida diretamente
                 send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
                 return {"ok": True}
-            
-            # Processa a consulta em segundo plano para não travar o webhook
             background_tasks.add_task(process_inventory_query, chat_id, product)
+        
+        # ========== COMANDO /ADICIONAR_PRODUTO ==========
+        elif text.startswith("/adicionar_produto"):
+            # Verifica se é administrador (apenas o admin pode adicionar)
+            if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+                send_telegram_message(chat_id, "⛔ Apenas administradores podem adicionar produtos.")
+                return {"ok": True}
+            
+            # Formato: /adicionar_produto nome|marca|volume|quantidade|preco|gelada
+            parts = text.replace("/adicionar_produto", "").strip().split("|")
+            if len(parts) != 6:
+                send_telegram_message(chat_id, 
+                    "📝 *Formato inválido!*\n\n"
+                    "Use:\n"
+                    "`/adicionar_produto nome|marca|volume|quantidade|preco|gelada`\n\n"
+                    "Exemplo:\n"
+                    "`/adicionar_produto Heineken|Heineken|350|48|690|true`\n\n"
+                    "Parâmetros:\n"
+                    "• nome: Nome do produto\n"
+                    "• marca: Marca (Ambev, Heineken, etc.)\n"
+                    "• volume: Volume em ml\n"
+                    "• quantidade: Número em estoque\n"
+                    "• preco: Preço em centavos (690 = R$ 6,90)\n"
+                    "• gelada: true/false"
+                )
+                return {"ok": True}
+            
+            nome, marca, volume, quantidade, preco, gelada = parts
+            
+            # Validações básicas
+            try:
+                volume_int = int(volume)
+                quantidade_int = int(quantidade)
+                preco_int = int(preco)
+                gelada_bool = gelada.lower() == "true"
+                if volume_int <= 0 or quantidade_int < 0 or preco_int <= 0:
+                    raise ValueError("Valores inválidos")
+            except ValueError:
+                send_telegram_message(chat_id, "❌ Erro: Volume, quantidade e preço devem ser números positivos. Preço em centavos (ex: 690 = R$ 6,90).")
+                return {"ok": True}
+            
+            # Insere no Supabase
+            try:
+                headers = {
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "product_name": nome,
+                    "brand": marca,
+                    "volume_ml": volume_int,
+                    "quantity": quantidade_int,
+                    "price_cents": preco_int,
+                    "is_cold": gelada_bool
+                }
+                url = f"{SUPABASE_URL}/rest/v1/inventory"
+                response = requests.post(url, json=data, headers=headers)
+                
+                if response.status_code in (200, 201):
+                    send_telegram_message(chat_id, 
+                        f"✅ *Produto adicionado com sucesso!*\n\n"
+                        f"🍺 {nome}\n"
+                        f"🏷️ Marca: {marca}\n"
+                        f"📏 Volume: {volume_int}ml\n"
+                        f"📦 Estoque: {quantidade_int} unidades\n"
+                        f"💰 Preço: R$ {preco_int/100:.2f}\n"
+                        f"🌡️ {'Gelada' if gelada_bool else 'Ambiente'}"
+                    )
+                else:
+                    send_telegram_message(chat_id, f"❌ Erro ao adicionar produto:\n{response.text}")
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
+        
         else:
-            send_telegram_message(chat_id, "Comando não reconhecido. Use /estoque <produto>")
-
+            send_telegram_message(chat_id, "Comando não reconhecido. Use /estoque <produto> ou /adicionar_produto ...")
+    
     except Exception as e:
         print(f"Erro geral no webhook: {e}")
     
-    # Retorna 200 imediatamente para o Telegram (não espera a consulta terminar)
     return {"ok": True}
 
 @app.on_event("startup")
