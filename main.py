@@ -122,7 +122,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         # Verifica se o chat é autorizado (se ADMIN_CHAT_ID estiver configurado)
-        if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+        # if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
             print(f"Chat não autorizado: {chat_id}")
             return {"ok": True}
 
