@@ -135,8 +135,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(process_inventory_query, chat_id, product)
         
         # ========== COMANDO /ADICIONAR_PRODUTO ==========
-       # ========== COMANDO /ADICIONAR_PRODUTO ==========
-elif text.startswith("/adicionar_produto"):
+    elif text.startswith("/adicionar_produto"):
     # Verifica se é administrador
     if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
         send_telegram_message(chat_id, "⛔ Apenas administradores podem adicionar produtos.")
