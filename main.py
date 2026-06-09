@@ -121,21 +121,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if chat_id is None or text is None:
             return {"ok": True}
 
-        # Verifica se o chat é autorizado (se ADMIN_CHAT_ID estiver configurado)
+        # Verifica se o chat é autorizado
         if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
             print(f"Chat não autorizado: {chat_id}")
             return {"ok": True}
 
-        # ========== COMANDO /ESTOQUE ==========
-        if text.startswith("/estoque"):
-            product = text.replace("/estoque", "").strip()
-            if not product:
-                send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
-                return {"ok": True}
-            background_tasks.add_task(process_inventory_query, chat_id, product)
+        # ========== COMANDOS (ordem correta: do mais específico para o mais geral) ==========
         
-        # ========== COMANDO /ESTOQUE_COMPLETO ==========
-        elif text.startswith("/estoque_completo"):
+        # Comando /estoque_completo (mais específico)
+        if text == "/estoque_completo":
             try:
                 headers = {
                     "apikey": SUPABASE_SERVICE_KEY,
@@ -167,8 +161,8 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
 
-        # ========== COMANDO /ESTOQUE_RESUMO ==========
-        elif text.startswith("/estoque_resumo"):
+        # Comando /estoque_resumo
+        elif text == "/estoque_resumo":
             try:
                 headers = {
                     "apikey": SUPABASE_SERVICE_KEY,
@@ -194,14 +188,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
 
-        # ========== COMANDO /ADICIONAR_PRODUTO ==========
+        # Comando /adicionar_produto
         elif text.startswith("/adicionar_produto"):
-            # Verifica se é administrador
             if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
                 send_telegram_message(chat_id, "⛔ Apenas administradores podem adicionar produtos.")
                 return {"ok": True}
             
-            # Remove o comando e separa por pipe, limpando espaços
             parts_raw = text.replace("/adicionar_produto", "").strip().split("|")
             parts = [p.strip() for p in parts_raw]
             
@@ -217,7 +209,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             
             nome, marca, volume, quantidade, preco, gelada = parts
             
-            # Validações
             try:
                 volume_int = int(volume)
                 quantidade_int = int(quantidade)
@@ -229,7 +220,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 send_telegram_message(chat_id, "❌ Erro: Volume, quantidade e preço devem ser números positivos. Preço em centavos (ex: 690 = R$ 6,90).")
                 return {"ok": True}
             
-            # Insere no Supabase
             try:
                 headers = {
                     "apikey": SUPABASE_SERVICE_KEY,
@@ -261,8 +251,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     send_telegram_message(chat_id, f"❌ Erro ao adicionar produto:\n{response.text}")
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
-        
-        # ========== COMANDO NÃO RECONHECIDO ==========
+
+        # Comando /estoque (mais geral, deve ficar por último)
+        elif text.startswith("/estoque"):
+            product = text.replace("/estoque", "").strip()
+            if not product:
+                send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
+                return {"ok": True}
+            background_tasks.add_task(process_inventory_query, chat_id, product)
+
         else:
             send_telegram_message(chat_id, "Comando não reconhecido.\n\nComandos disponíveis:\n/estoque <produto>\n/estoque_completo\n/estoque_resumo\n/adicionar_produto (admin)")
 
