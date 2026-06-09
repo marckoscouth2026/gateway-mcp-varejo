@@ -257,25 +257,35 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
         # ========== COMANDO /ATUALIZAR_ESTOQUE ==========
         elif text.startswith("/atualizar_estoque"):
-            if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
-                send_telegram_message(chat_id, "⛔ Apenas administradores podem atualizar o estoque.")
-                return {"ok": True}
-            
-            parts = text.replace("/atualizar_estoque", "").strip().split("|")
-            if len(parts) != 2:
-                send_telegram_message(chat_id, 
-                    "📝 *Formato inválido!*\n\n"
-                    "Use:\n"
-                    "`/atualizar_estoque produto|+10`  (para adicionar 10 unidades)\n"
-                    "`/atualizar_estoque produto|-5`   (para remover 5 unidades)\n\n"
-                    "Exemplo:\n"
-                    "`/atualizar_estoque Stella Artois|+10`"
-                )
-                return {"ok": True}
-            
-            nome, operacao = parts
-            operacao = operacao.strip()
-            
+    if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+        send_telegram_message(chat_id, "⛔ Apenas administradores podem atualizar o estoque.")
+        return {"ok": True}
+    
+    # Remove o comando e limpa espaços
+    resto = text.replace("/atualizar_estoque", "").strip()
+    # Separa pelo pipe, mas remove espaços ao redor
+    if "|" not in resto:
+        send_telegram_message(chat_id, 
+            "📝 *Formato inválido!*\n\n"
+            "Use:\n"
+            "`/atualizar_estoque produto|+10`\n\n"
+            "Exemplo:\n"
+            "`/atualizar_estoque Heineken|+5`"
+        )
+        return {"ok": True}
+    
+    parts = [p.strip() for p in resto.split("|")]
+    if len(parts) != 2:
+        send_telegram_message(chat_id, "Formato inválido. Use: `/atualizar_estoque produto|+10`")
+        return {"ok": True}
+    
+    nome, operacao = parts
+    # Remove espaços extras do nome (caso tenha)
+    nome = nome.strip()
+    operacao = operacao.strip()
+    
+    try:
+        # ... resto do código igual (verifica +/-, busca produto, atualiza)
             try:
                 # Verifica se operacao começa com + ou -
                 if not (operacao.startswith("+") or operacao.startswith("-")):
