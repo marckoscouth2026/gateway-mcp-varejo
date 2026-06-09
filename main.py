@@ -126,9 +126,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             print(f"Chat não autorizado: {chat_id}")
             return {"ok": True}
 
-        # ========== COMANDOS (ordem correta: do mais específico para o mais geral) ==========
-        
-        # Comando /estoque_completo (mais específico)
+        # ========== COMANDO /ESTOQUE_COMPLETO ==========
         if text == "/estoque_completo":
             try:
                 headers = {
@@ -161,7 +159,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
 
-        # Comando /estoque_resumo
+        # ========== COMANDO /ESTOQUE_RESUMO ==========
         elif text == "/estoque_resumo":
             try:
                 headers = {
@@ -188,7 +186,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
 
-        # Comando /adicionar_produto
+        # ========== COMANDO /ADICIONAR_PRODUTO ==========
         elif text.startswith("/adicionar_produto"):
             if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
                 send_telegram_message(chat_id, "⛔ Apenas administradores podem adicionar produtos.")
@@ -220,12 +218,17 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 send_telegram_message(chat_id, "❌ Erro: Volume, quantidade e preço devem ser números positivos. Preço em centavos (ex: 690 = R$ 6,90).")
                 return {"ok": True}
             
+            # Verificar se produto já existe
+            headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=eq.{nome}"
+            check_response = requests.get(check_url, headers=headers)
+            
+            if check_response.status_code == 200 and check_response.json():
+                send_telegram_message(chat_id, f"⚠️ Produto '{nome}' já existe no estoque. Use `/atualizar_estoque {nome}|+X` para adicionar unidades.")
+                return {"ok": True}
+            
+            # Insere no Supabase
             try:
-                headers = {
-                    "apikey": SUPABASE_SERVICE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                    "Content-Type": "application/json"
-                }
                 data = {
                     "product_name": nome,
                     "brand": marca,
@@ -252,7 +255,70 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
 
-        # Comando /estoque (mais geral, deve ficar por último)
+        # ========== COMANDO /ATUALIZAR_ESTOQUE ==========
+        elif text.startswith("/atualizar_estoque"):
+            if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+                send_telegram_message(chat_id, "⛔ Apenas administradores podem atualizar o estoque.")
+                return {"ok": True}
+            
+            parts = text.replace("/atualizar_estoque", "").strip().split("|")
+            if len(parts) != 2:
+                send_telegram_message(chat_id, 
+                    "📝 *Formato inválido!*\n\n"
+                    "Use:\n"
+                    "`/atualizar_estoque produto|+10`  (para adicionar 10 unidades)\n"
+                    "`/atualizar_estoque produto|-5`   (para remover 5 unidades)\n\n"
+                    "Exemplo:\n"
+                    "`/atualizar_estoque Stella Artois|+10`"
+                )
+                return {"ok": True}
+            
+            nome, operacao = parts
+            operacao = operacao.strip()
+            
+            try:
+                # Verifica se operacao começa com + ou -
+                if not (operacao.startswith("+") or operacao.startswith("-")):
+                    raise ValueError("Use + ou - antes do número")
+                
+                delta = int(operacao)
+                
+                # Busca o produto no Supabase
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=eq.{nome}"
+                response = requests.get(check_url, headers=headers)
+                
+                if response.status_code != 200 or not response.json():
+                    send_telegram_message(chat_id, f"❌ Produto '{nome}' não encontrado.")
+                    return {"ok": True}
+                
+                produto = response.json()[0]
+                nova_quantidade = produto["quantity"] + delta
+                if nova_quantidade < 0:
+                    send_telegram_message(chat_id, f"❌ Estoque não pode ficar negativo. Atual: {produto['quantity']} unidades.")
+                    return {"ok": True}
+                
+                # Atualiza o produto
+                update_url = f"{SUPABASE_URL}/rest/v1/inventory?id=eq.{produto['id']}"
+                update_data = {"quantity": nova_quantidade}
+                update_response = requests.patch(update_url, json=update_data, headers=headers)
+                
+                if update_response.status_code in (200, 204):
+                    sinal = "adicionadas" if delta > 0 else "removidas"
+                    send_telegram_message(chat_id, 
+                        f"✅ *Estoque atualizado*\n\n"
+                        f"🍺 {nome}\n"
+                        f"📦 {abs(delta)} unidades {sinal}\n"
+                        f"📊 Novo estoque: {nova_quantidade} unidades"
+                    )
+                else:
+                    send_telegram_message(chat_id, f"❌ Erro ao atualizar estoque: {update_response.text}")
+            except ValueError as e:
+                send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Erro interno: {str(e)}")
+
+        # ========== COMANDO /ESTOQUE (produto específico) ==========
         elif text.startswith("/estoque"):
             product = text.replace("/estoque", "").strip()
             if not product:
@@ -261,7 +327,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(process_inventory_query, chat_id, product)
 
         else:
-            send_telegram_message(chat_id, "Comando não reconhecido.\n\nComandos disponíveis:\n/estoque <produto>\n/estoque_completo\n/estoque_resumo\n/adicionar_produto (admin)")
+            send_telegram_message(chat_id, "Comando não reconhecido.\n\nComandos disponíveis:\n"
+                                          "/estoque <produto>\n"
+                                          "/estoque_completo\n"
+                                          "/estoque_resumo\n"
+                                          "/adicionar_produto (admin)\n"
+                                          "/atualizar_estoque (admin)")
 
     except Exception as e:
         print(f"Erro geral no webhook: {e}")
