@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 import os
 import requests
@@ -28,22 +28,57 @@ class InventoryRequest(BaseModel):
 
 # ========== FUNÇÕES ==========
 def send_telegram_message(chat_id: int, text: str):
+    """Envia mensagem para o Telegram (chamada síncrona, mas rápida)."""
     if not TELEGRAM_BOT_TOKEN:
         print("ERRO: TELEGRAM_BOT_TOKEN não configurado.")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     try:
-        requests.post(url, json=payload, timeout=5)
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code != 200:
+            print(f"Falha ao enviar mensagem: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
 def query_supabase(table: str, params: dict = None):
+    """Consulta o Supabase (pode ser lenta na primeira vez)."""
     headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
     url = f"{SUPABASE_URL}/rest/v1/{table}"
-    resp = requests.get(url, headers=headers, params=params, timeout=10)
+    resp = requests.get(url, headers=headers, params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()
+
+def process_inventory_query(chat_id: int, product: str):
+    """Processa a consulta de estoque e envia a resposta (executada em segundo plano)."""
+    try:
+        # Chama o endpoint local para evitar HTTP
+        if not AUTO_APPROVE_SECRET:
+            send_telegram_message(chat_id, "❌ Erro de configuração: secret não definido.")
+            return
+        
+        # Consulta direta ao Supabase (evita chamada HTTP interna)
+        results = query_supabase("inventory", params={"product_name": f"eq.{product}"})
+        if not results:
+            send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado no estoque.")
+            return
+        
+        product_data = results[0]
+        cold_status = "🌡️ **Gelada**" if product_data["is_cold"] else "❄️ **Ambiente**"
+        msg = (f"🍺 *{product_data['product_name']}*\n"
+               f"{cold_status}\n"
+               f"📦 Estoque: {product_data['quantity']} unidades\n"
+               f"💰 Preço: R$ {product_data['price_cents']/100:.2f}")
+        if product_data.get("brand"):
+            msg += f"\n🏷️ Marca: {product_data['brand']}"
+        if product_data.get("volume_ml"):
+            msg += f"\n📏 Volume: {product_data['volume_ml']}ml"
+        
+        send_telegram_message(chat_id, msg)
+    except Exception as e:
+        error_msg = f"❌ Erro ao consultar estoque: {str(e)}"
+        print(error_msg)
+        send_telegram_message(chat_id, error_msg)
 
 # ========== ENDPOINTS ==========
 @app.get("/")
@@ -80,9 +115,9 @@ async def check_inventory(request: InventoryRequest):
     except Exception as e:
         raise HTTPException(500, f"Erro interno: {str(e)}")
 
-# ========== WEBHOOK DO TELEGRAM ==========
+# ========== WEBHOOK DO TELEGRAM (OTIMIZADO) ==========
 @app.post("/telegram/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         body = await request.json()
         print("Webhook recebido:", body)
@@ -99,44 +134,28 @@ async def webhook(request: Request):
         if chat_id is None or text is None:
             return {"ok": True}
 
+        # Verifica se o chat é autorizado
         if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
-            print(f"Chat não autorizado: {chat_id}")
+            print(f"Chat não autorizado: {chat_id}. ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
+            # Ainda responde 200 para o Telegram, mas não processa
             return {"ok": True}
 
         if text.startswith("/estoque"):
             product = text.replace("/estoque", "").strip()
             if not product:
-                await send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
+                # Envia resposta rápida diretamente
+                send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
                 return {"ok": True}
             
-            proxy_url = os.getenv("PROXY_URL", "https://gateway-mcp-varejo.onrender.com")
-            inventory_url = f"{proxy_url}/inventory/check"
-            
-            payload = {"product_name": product, "secret": AUTO_APPROVE_SECRET}
-            try:
-                response = requests.post(inventory_url, json=payload, timeout=30)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data["found"]:
-                        cold_status = "🌡️ **Gelada**" if data["is_cold"] else "❄️ **Ambiente**"
-                        msg = (f"🍺 *{data['product']}*\n"
-                               f"{cold_status}\n"
-                               f"📦 Estoque: {data['quantity']} unidades\n"
-                               f"💰 Preço: {data['price']}")
-                    else:
-                        msg = data["message"]
-                else:
-                    msg = f"❌ Erro ao consultar estoque. Status: {response.status_code}"
-            except Exception as e:
-                msg = f"❌ Erro: {str(e)}"
-            
-            await send_telegram_message(chat_id, msg)
+            # Processa a consulta em segundo plano para não travar o webhook
+            background_tasks.add_task(process_inventory_query, chat_id, product)
         else:
-            await send_telegram_message(chat_id, "Comando não reconhecido. Use /estoque <produto>")
+            send_telegram_message(chat_id, "Comando não reconhecido. Use /estoque <produto>")
 
     except Exception as e:
         print(f"Erro geral no webhook: {e}")
     
+    # Retorna 200 imediatamente para o Telegram (não espera a consulta terminar)
     return {"ok": True}
 
 @app.on_event("startup")
