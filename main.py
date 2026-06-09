@@ -257,7 +257,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
         # ========== COMANDO /ATUALIZAR_ESTOQUE ==========
         elif text.startswith("/atualizar_estoque"):
-    if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
+      if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
         send_telegram_message(chat_id, "⛔ Apenas administradores podem atualizar o estoque.")
         return {"ok": True}
     
