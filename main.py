@@ -83,6 +83,39 @@ async def webhook(request: Request):
             
             if text == "/menu" or text == "/start":
                 send_message(chat_id, "🤖 *MENU CLIENTE*", reply_markup=cliente_keyboard())
+                        # ========== PERGUNTAS EM LINGUAGEM NATURAL ==========
+        # Se não é comando e não é callback, tenta interpretar como pergunta
+        if "message" in body and chat_id:
+            text = body["message"].get("text", "")
+            if text and not text.startswith("/"):
+                palavras_chave = ["tem", "estoque", "possui", "disponível", "tem gelada", "cerveja"]
+                palavras_produtos = ["heineken", "stella", "original", "brahma", "skol", "colorado"]
+                
+                mensagem = text.lower()
+                eh_pergunta = any(p in mensagem for p in palavras_chave)
+                produto_encontrado = None
+                
+                for produto in palavras_produtos:
+                    if produto in mensagem:
+                        produto_encontrado = produto
+                        break
+                
+                if eh_pergunta and produto_encontrado:
+                    # Busca o produto no Supabase
+                    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=ilike.*{produto_encontrado}*"
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    
+                    if resp.status_code == 200 and resp.json():
+                        p = resp.json()[0]
+                        cold = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                        msg = (f"🍺 *{p['product_name']}* {cold}\n"
+                               f"📦 Estoque: {p['quantity']} un\n"
+                               f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                        send_message(chat_id, msg)
+                    else:
+                        send_message(chat_id, f"❌ Produto '{produto_encontrado}' não encontrado.")
+                    return {"ok": True}
                 return {"ok": True}
             
             # ========== COMANDO EXPORTAR (texto) ==========
