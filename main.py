@@ -347,32 +347,39 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         # ========== CALLBACK QUERIES (CLIQUES NOS BOTÕES) ==========
+               # ========== CALLBACK QUERIES (CLIQUES NOS BOTÕES) ==========
         elif "callback_query" in body:
             cb = body["callback_query"]
             chat_id = cb["message"]["chat"]["id"]
             data = cb["data"]
             callback_id = cb["id"]
-            message_id = cb["message"]["message_id"]
-
-            # Remove o loading do botão
-            answer_callback_query(callback_id, "")
-
+            
+            print(f"Callback recebido: data={data}, chat_id={chat_id}")
+            
+            # Responde imediatamente para o Telegram (remove o "loading")
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                requests.post(url, json={"callback_query_id": callback_id, "text": "Processando..."}, timeout=5)
+            except Exception as e:
+                print(f"Erro ao responder callback: {e}")
+            
+            # Processa cada ação
             if data == "estoque_resumo":
-                background_tasks.add_task(process_estoque_resumo, chat_id)
-
+                process_estoque_resumo(chat_id)
+            
             elif data == "estoque_completo":
-                background_tasks.add_task(process_estoque_completo, chat_id)
-
+                process_estoque_completo(chat_id)
+            
             elif data == "consultar_produto":
                 send_telegram_message(chat_id, "🔍 *Consultar Produto*\n\nEscolha um produto abaixo:", reply_markup=build_produtos_keyboard())
-
+            
             elif data.startswith("produto|"):
                 produto = data.split("|")[1]
-                background_tasks.add_task(process_inventory_query, chat_id, produto)
-
+                process_inventory_query(chat_id, produto)
+            
             elif data == "digitar_produto":
                 send_telegram_message(chat_id, "📝 Digite o nome do produto que deseja consultar (ex: Heineken):")
-
+            
             elif data == "ajuda":
                 send_telegram_message(chat_id, 
                     "🤖 *Comandos disponíveis*\n\n"
@@ -382,12 +389,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     "/adicionar_produto - Adicionar produto (admin)\n"
                     "/atualizar_estoque - Atualizar estoque (admin)",
                     reply_markup=build_main_keyboard())
-
+            
             elif data == "menu_principal":
                 send_telegram_message(chat_id, "🤖 *Menu Principal*\n\nEscolha uma opção:", reply_markup=build_main_keyboard())
-
+            
             return {"ok": True}
-
         # ========== PROCESSAMENTO DE MENSAGENS EM LINGUAGEM NATURAL ==========
         else:
             palavras_estoque = ["tem", "estoque", "possui", "disponível", "tem gelada", "cerveja", "cervejas"]
