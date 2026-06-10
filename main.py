@@ -52,6 +52,10 @@ def cliente_keyboard():
              {"text": "📋 COMPLETO", "callback_data": "completo"}],
             [{"text": "🍺 HEINEKEN", "callback_data": "heineken"},
              {"text": "🍺 STELLA", "callback_data": "stella"}],
+            [{"text": "🍺 ORIGINAL", "callback_data": "original"},
+             {"text": "🍺 BRAHMA", "callback_data": "brahma"}],
+            [{"text": "🍺 SKOL", "callback_data": "skol"},
+             {"text": "🍺 COLORADO", "callback_data": "colorado"}],
             [{"text": "🔧 ADMIN", "callback_data": "admin"}]
         ]
     }
@@ -61,6 +65,7 @@ def admin_keyboard():
         "inline_keyboard": [
             [{"text": "➕ ADICIONAR PRODUTO", "callback_data": "adicionar"}],
             [{"text": "📦 ATUALIZAR ESTOQUE", "callback_data": "atualizar"}],
+            [{"text": "📊 EXPORTAR ESTOQUE", "callback_data": "exportar"}],
             [{"text": "🔙 VOLTAR", "callback_data": "voltar"}]
         ]
     }
@@ -78,6 +83,22 @@ async def webhook(request: Request):
             
             if text == "/menu" or text == "/start":
                 send_message(chat_id, "🤖 *MENU CLIENTE*", reply_markup=cliente_keyboard())
+                return {"ok": True}
+            
+            # ========== COMANDO EXPORTAR (texto) ==========
+            if text == "/exportar_estoque" and chat_id == ADMIN_CHAT_ID:
+                produtos = consultar_supabase(chat_id, "inventory?order=product_name.asc")
+                if produtos:
+                    csv_data = "produto,marca,volume,quantidade,preco,gelada\n"
+                    for p in produtos:
+                        gelada = "sim" if p["is_cold"] else "nao"
+                        csv_data += f"{p['product_name']},{p['brand']},{p['volume_ml']},{p['quantity']},{p['price_cents']/100:.2f},{gelada}\n"
+                    if len(csv_data) < 4000:
+                        send_message(chat_id, f"📊 *ESTOQUE CSV*\n\n<code>{csv_data}</code>")
+                    else:
+                        send_message(chat_id, "📊 Estoque muito grande. Use o Supabase para exportar.")
+                else:
+                    send_message(chat_id, "❌ Erro ao gerar exportação.")
                 return {"ok": True}
 
         elif "callback_query" in body:
@@ -113,6 +134,24 @@ async def webhook(request: Request):
                     return {"ok": True}
                 send_message(chat_id, "📦 *Atualizar Estoque*\n\nUse o comando:\n`/atualizar produto|+10` ou `/atualizar produto|-5`\n\nExemplo:\n`/atualizar Heineken|+10`")
             
+            # ========== EXPORTAR ESTOQUE ==========
+            elif data == "exportar":
+                if chat_id != ADMIN_CHAT_ID:
+                    send_message(chat_id, "⛔ Acesso negado.")
+                    return {"ok": True}
+                produtos = consultar_supabase(chat_id, "inventory?order=product_name.asc")
+                if produtos:
+                    csv_data = "produto,marca,volume,quantidade,preco,gelada\n"
+                    for p in produtos:
+                        gelada = "sim" if p["is_cold"] else "nao"
+                        csv_data += f"{p['product_name']},{p['brand']},{p['volume_ml']},{p['quantity']},{p['price_cents']/100:.2f},{gelada}\n"
+                    if len(csv_data) < 4000:
+                        send_message(chat_id, f"📊 *ESTOQUE CSV*\n\n<code>{csv_data}</code>")
+                    else:
+                        send_message(chat_id, "📊 Estoque muito grande. Use o Supabase para exportar.")
+                else:
+                    send_message(chat_id, "❌ Erro ao gerar exportação.")
+            
             # ========== CONSULTAS ==========
             elif data == "resumo":
                 produtos = consultar_supabase(chat_id, "inventory?order=product_name.asc")
@@ -143,6 +182,7 @@ async def webhook(request: Request):
                             msg = msg[:4000] + "\n\n... (mais produtos)"
                         send_message(chat_id, msg)
             
+            # ========== PRODUTOS ESPECÍFICOS ==========
             elif data == "heineken":
                 produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*heineken*")
                 if produtos and len(produtos) > 0:
@@ -166,6 +206,54 @@ async def webhook(request: Request):
                     send_message(chat_id, msg)
                 else:
                     send_message(chat_id, "❌ Stella Artois não encontrada.")
+            
+            elif data == "original":
+                produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*original*")
+                if produtos and len(produtos) > 0:
+                    p = produtos[0]
+                    cold = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                    msg = (f"🍺 *{p['product_name']}* {cold}\n"
+                           f"📦 Estoque: {p['quantity']} un\n"
+                           f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                    send_message(chat_id, msg)
+                else:
+                    send_message(chat_id, "❌ Original não encontrada.")
+            
+            elif data == "brahma":
+                produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*brahma*")
+                if produtos and len(produtos) > 0:
+                    p = produtos[0]
+                    cold = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                    msg = (f"🍺 *{p['product_name']}* {cold}\n"
+                           f"📦 Estoque: {p['quantity']} un\n"
+                           f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                    send_message(chat_id, msg)
+                else:
+                    send_message(chat_id, "❌ Brahma não encontrada.")
+            
+            elif data == "skol":
+                produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*skol*")
+                if produtos and len(produtos) > 0:
+                    p = produtos[0]
+                    cold = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                    msg = (f"🍺 *{p['product_name']}* {cold}\n"
+                           f"📦 Estoque: {p['quantity']} un\n"
+                           f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                    send_message(chat_id, msg)
+                else:
+                    send_message(chat_id, "❌ Skol não encontrada.")
+            
+            elif data == "colorado":
+                produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*colorado*")
+                if produtos and len(produtos) > 0:
+                    p = produtos[0]
+                    cold = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                    msg = (f"🍺 *{p['product_name']}* {cold}\n"
+                           f"📦 Estoque: {p['quantity']} un\n"
+                           f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                    send_message(chat_id, msg)
+                else:
+                    send_message(chat_id, "❌ Colorado não encontrada.")
             
             return {"ok": True}
         
