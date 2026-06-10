@@ -361,12 +361,57 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 f"📌 Sua reserva está garantida. Passe na loja para retirar.")
 
         # ========== COMANDO /ESTOQUE (produto específico) ==========
-        elif text.startswith("/estoque"):
-            product = text.replace("/estoque", "").strip()
-            if not product:
-                send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
-                return {"ok": True}
-            background_tasks.add_task(process_inventory_query, chat_id, product)
+        # ========== COMANDO /ESTOQUE (produto específico - com busca aproximada) ==========
+elif text.startswith("/estoque"):
+    product = text.replace("/estoque", "").strip()
+    if not product:
+        send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
+        return {"ok": True}
+    
+    try:
+        headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        # Busca aproximada (case-insensitive e contém a palavra)
+        check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=ilike.*{product}*"
+        response = requests.get(check_url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            produtos_encontrados = response.json()
+            if produtos_encontrados:
+                # Se encontrou mais de um, lista todos
+                if len(produtos_encontrados) > 1:
+                    msg = f"🔍 *Produtos encontrados para '{product}':*\n\n"
+                    for p in produtos_encontrados:
+                        gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                        msg += (f"🍺 *{p['product_name']}*\n"
+                               f"   📦 {p['quantity']} un | 💰 R$ {p['price_cents']/100:.2f} | {gelado}\n\n")
+                    send_telegram_message(chat_id, msg)
+                else:
+                    # Produto único - mostra detalhes
+                    p = produtos_encontrados[0]
+                    cold_status = "🌡️ **Gelada**" if p["is_cold"] else "❄️ **Ambiente**"
+                    msg = (f"🍺 *{p['product_name']}*\n"
+                           f"{cold_status}\n"
+                           f"📦 Estoque: {p['quantity']} unidades\n"
+                           f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                    if p.get("brand"):
+                        msg += f"\n🏷️ Marca: {p['brand']}"
+                    if p.get("volume_ml"):
+                        msg += f"\n📏 Volume: {p['volume_ml']}ml"
+                    send_telegram_message(chat_id, msg)
+            else:
+                # Produto não encontrado - lista sugestões
+                url_lista = f"{SUPABASE_URL}/rest/v1/inventory?select=product_name&order=product_name.asc"
+                resp_lista = requests.get(url_lista, headers=headers, timeout=10)
+                if resp_lista.status_code == 200:
+                    todos_produtos = [p["product_name"] for p in resp_lista.json()]
+                    sugestoes = ", ".join(todos_produtos[:10])
+                    send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado.\n\n📋 Produtos disponíveis: {sugestoes}\n\nUse `/estoque <nome>` para consultar um específico.")
+                else:
+                    send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado no estoque.\n\nUse `/estoque_resumo` para ver todos os produtos.")
+        else:
+            send_telegram_message(chat_id, f"❌ Erro ao consultar estoque: {response.status_code}")
+    except Exception as e:
+        send_telegram_message(chat_id, f"❌ Erro ao consultar estoque: {str(e)}")
 
         # ========== PROCESSAMENTO DE MENSAGENS EM LINGUAGEM NATURAL ==========
         else:
