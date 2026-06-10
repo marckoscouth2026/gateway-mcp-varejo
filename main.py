@@ -139,7 +139,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 
                 if response.status_code == 200:
                     produtos = response.json()
-                    if not produits:
+                    if not produtos:
                         send_telegram_message(chat_id, "📦 *Estoque vazio!*")
                         return {"ok": True}
                     
