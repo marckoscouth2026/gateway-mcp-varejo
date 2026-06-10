@@ -27,29 +27,43 @@ def answer_callback(callback_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
     try:
         requests.post(url, json={"callback_query_id": callback_id}, timeout=5)
-    except Exception as e:
-        print(f"Erro answer: {e}")
+    except Exception:
+        pass
 
 def consultar_supabase(chat_id, endpoint):
-    """Função genérica para consultar o Supabase com tratamento de erro."""
     try:
         headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
-        print(f"Consultando: {url}")
         resp = requests.get(url, headers=headers, timeout=10)
-        print(f"Status: {resp.status_code}")
-        
         if resp.status_code == 200:
             return resp.json()
         else:
-            send_message(chat_id, f"❌ Erro {resp.status_code} ao consultar o banco de dados.")
+            send_message(chat_id, f"❌ Erro {resp.status_code}")
             return None
-    except requests.exceptions.Timeout:
-        send_message(chat_id, "❌ Tempo limite excedido. Tente novamente.")
-        return None
     except Exception as e:
         send_message(chat_id, f"❌ Erro: {str(e)}")
         return None
+
+# ========== TECLADOS ==========
+def cliente_keyboard():
+    return {
+        "inline_keyboard": [
+            [{"text": "📦 RESUMO", "callback_data": "resumo"},
+             {"text": "📋 COMPLETO", "callback_data": "completo"}],
+            [{"text": "🍺 HEINEKEN", "callback_data": "heineken"},
+             {"text": "🍺 STELLA", "callback_data": "stella"}],
+            [{"text": "🔧 ADMIN", "callback_data": "admin"}]
+        ]
+    }
+
+def admin_keyboard():
+    return {
+        "inline_keyboard": [
+            [{"text": "➕ ADICIONAR PRODUTO", "callback_data": "adicionar"}],
+            [{"text": "📦 ATUALIZAR ESTOQUE", "callback_data": "atualizar"}],
+            [{"text": "🔙 VOLTAR", "callback_data": "voltar"}]
+        ]
+    }
 
 @app.post("/telegram/webhook")
 async def webhook(request: Request):
@@ -62,16 +76,8 @@ async def webhook(request: Request):
             chat_id = body["message"]["chat"]["id"]
             text = body["message"].get("text", "")
             
-            if text == "/menu":
-                keyboard = {
-                    "inline_keyboard": [
-                        [{"text": "📦 RESUMO", "callback_data": "resumo"}],
-                        [{"text": "📋 COMPLETO", "callback_data": "completo"}],
-                        [{"text": "🍺 HEINEKEN", "callback_data": "heineken"}],
-                        [{"text": "🍺 STELLA", "callback_data": "stella"}]
-                    ]
-                }
-                send_message(chat_id, "🤖 *MENU*", reply_markup=keyboard)
+            if text == "/menu" or text == "/start":
+                send_message(chat_id, "🤖 *MENU CLIENTE*", reply_markup=cliente_keyboard())
                 return {"ok": True}
 
         elif "callback_query" in body:
@@ -83,8 +89,32 @@ async def webhook(request: Request):
             print(f"Callback: {data}")
             answer_callback(callback_id)
             
-            # ========== RESUMO ==========
-            if data == "resumo":
+            # ========== MENU ADMIN ==========
+            if data == "admin":
+                if chat_id == ADMIN_CHAT_ID:
+                    send_message(chat_id, "🔧 *MENU ADMIN*", reply_markup=admin_keyboard())
+                else:
+                    send_message(chat_id, "⛔ Acesso negado. Apenas administradores.")
+            
+            elif data == "voltar":
+                send_message(chat_id, "🤖 *MENU CLIENTE*", reply_markup=cliente_keyboard())
+            
+            # ========== ADICIONAR PRODUTO ==========
+            elif data == "adicionar":
+                if chat_id != ADMIN_CHAT_ID:
+                    send_message(chat_id, "⛔ Acesso negado.")
+                    return {"ok": True}
+                send_message(chat_id, "📝 *Adicionar Produto*\n\nUse o comando:\n`/adicionar nome|marca|volume|qtd|preco|gelada`\n\nExemplo:\n`/adicionar Heineken|Heineken|350|50|690|true`")
+            
+            # ========== ATUALIZAR ESTOQUE ==========
+            elif data == "atualizar":
+                if chat_id != ADMIN_CHAT_ID:
+                    send_message(chat_id, "⛔ Acesso negado.")
+                    return {"ok": True}
+                send_message(chat_id, "📦 *Atualizar Estoque*\n\nUse o comando:\n`/atualizar produto|+10` ou `/atualizar produto|-5`\n\nExemplo:\n`/atualizar Heineken|+10`")
+            
+            # ========== CONSULTAS ==========
+            elif data == "resumo":
                 produtos = consultar_supabase(chat_id, "inventory?order=product_name.asc")
                 if produtos:
                     if len(produtos) == 0:
@@ -96,7 +126,6 @@ async def webhook(request: Request):
                             msg += f"{emoji} *{p['product_name']}*: {p['quantity']} un\n"
                         send_message(chat_id, msg)
             
-            # ========== COMPLETO ==========
             elif data == "completo":
                 produtos = consultar_supabase(chat_id, "inventory?order=product_name.asc")
                 if produtos:
@@ -114,7 +143,6 @@ async def webhook(request: Request):
                             msg = msg[:4000] + "\n\n... (mais produtos)"
                         send_message(chat_id, msg)
             
-            # ========== HEINEKEN ==========
             elif data == "heineken":
                 produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*heineken*")
                 if produtos and len(produtos) > 0:
@@ -125,9 +153,8 @@ async def webhook(request: Request):
                            f"💰 Preço: R$ {p['price_cents']/100:.2f}")
                     send_message(chat_id, msg)
                 else:
-                    send_message(chat_id, "❌ Heineken não encontrada no estoque.")
+                    send_message(chat_id, "❌ Heineken não encontrada.")
             
-            # ========== STELLA ==========
             elif data == "stella":
                 produtos = consultar_supabase(chat_id, "inventory?product_name=ilike.*stella*")
                 if produtos and len(produtos) > 0:
@@ -138,9 +165,60 @@ async def webhook(request: Request):
                            f"💰 Preço: R$ {p['price_cents']/100:.2f}")
                     send_message(chat_id, msg)
                 else:
-                    send_message(chat_id, "❌ Stella Artois não encontrada no estoque.")
+                    send_message(chat_id, "❌ Stella Artois não encontrada.")
             
             return {"ok": True}
+        
+        # ========== COMANDOS DE TEXTO (ADMIN) ==========
+        if "message" in body and chat_id == ADMIN_CHAT_ID:
+            text = body["message"].get("text", "")
+            
+            if text.startswith("/adicionar"):
+                parts = text.replace("/adicionar", "").strip().split("|")
+                if len(parts) != 6:
+                    send_message(chat_id, "Formato inválido. Use: /adicionar nome|marca|volume|qtd|preco|gelada")
+                    return {"ok": True}
+                
+                nome, marca, volume, qtd, preco, gelada = parts
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}", "Content-Type": "application/json"}
+                data = {
+                    "product_name": nome.strip(),
+                    "brand": marca.strip(),
+                    "volume_ml": int(volume),
+                    "quantity": int(qtd),
+                    "price_cents": int(preco),
+                    "is_cold": gelada.strip().lower() == "true"
+                }
+                resp = requests.post(f"{SUPABASE_URL}/rest/v1/inventory", json=data, headers=headers)
+                if resp.status_code in (200, 201):
+                    send_message(chat_id, f"✅ Produto '{nome}' adicionado!")
+                else:
+                    send_message(chat_id, f"❌ Erro: {resp.text}")
+            
+            elif text.startswith("/atualizar"):
+                parts = text.replace("/atualizar", "").strip().split("|")
+                if len(parts) != 2:
+                    send_message(chat_id, "Formato inválido. Use: /atualizar produto|+10")
+                    return {"ok": True}
+                
+                nome, operacao = parts
+                delta = int(operacao)
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                resp = requests.get(f"{SUPABASE_URL}/rest/v1/inventory?product_name=eq.{nome}", headers=headers)
+                if resp.status_code == 200 and resp.json():
+                    produto = resp.json()[0]
+                    nova_qtd = produto["quantity"] + delta
+                    if nova_qtd < 0:
+                        send_message(chat_id, "❌ Estoque não pode ficar negativo.")
+                        return {"ok": True}
+                    update_resp = requests.patch(f"{SUPABASE_URL}/rest/v1/inventory?id=eq.{produto['id']}", json={"quantity": nova_qtd}, headers=headers)
+                    if update_resp.status_code in (200, 204):
+                        sinal = "adicionadas" if delta > 0 else "removidas"
+                        send_message(chat_id, f"✅ Estoque de '{nome}' atualizado: {abs(delta)} unidades {sinal}. Novo estoque: {nova_qtd}")
+                    else:
+                        send_message(chat_id, f"❌ Erro: {update_resp.text}")
+                else:
+                    send_message(chat_id, f"❌ Produto '{nome}' não encontrado.")
 
     except Exception as e:
         print(f"Erro geral: {e}")
