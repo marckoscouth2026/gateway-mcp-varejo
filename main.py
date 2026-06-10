@@ -360,24 +360,31 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 f"💰 Total: R$ {produto_data['price_cents']/100 * qtd_int:.2f}\n\n"
                 f"📌 Sua reserva está garantida. Passe na loja para retirar.")
 
-        # ========== COMANDO /ESTOQUE (produto específico) ==========
-        # ========== COMANDO /ESTOQUE (produto específico - com busca aproximada) ==========
-elif text.startswith("/estoque"):
-    product = text.replace("/estoque", "").strip()
+               # ========== COMANDO /ESTOQUE (produto específico - com busca aproximada) ==========
+# ========== COMANDO /ESTOQUE (aceita espaço ou underline) ==========
+if text.startswith("/estoque "):
+    product = text.replace("/estoque ", "").strip()
+elif text.startswith("/estoque_"):
+    product = text.replace("/estoque_", "").strip()
+elif text == "/estoque":
+    product = ""
+else:
+    product = None
+
+if product is not None:
     if not product:
-        send_telegram_message(chat_id, "Use: /estoque <nome do produto>")
+        send_telegram_message(chat_id, "Use: `/estoque Stella` ou `/estoque_Stella`\n\nExemplo: `/estoque Heineken`")
         return {"ok": True}
     
     try:
         headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        # Busca aproximada (case-insensitive e contém a palavra)
+        # Busca aproximada
         check_url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=ilike.*{product}*"
         response = requests.get(check_url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             produtos_encontrados = response.json()
             if produtos_encontrados:
-                # Se encontrou mais de um, lista todos
                 if len(produtos_encontrados) > 1:
                     msg = f"🔍 *Produtos encontrados para '{product}':*\n\n"
                     for p in produtos_encontrados:
@@ -386,7 +393,6 @@ elif text.startswith("/estoque"):
                                f"   📦 {p['quantity']} un | 💰 R$ {p['price_cents']/100:.2f} | {gelado}\n\n")
                     send_telegram_message(chat_id, msg)
                 else:
-                    # Produto único - mostra detalhes
                     p = produtos_encontrados[0]
                     cold_status = "🌡️ **Gelada**" if p["is_cold"] else "❄️ **Ambiente**"
                     msg = (f"🍺 *{p['product_name']}*\n"
@@ -399,15 +405,7 @@ elif text.startswith("/estoque"):
                         msg += f"\n📏 Volume: {p['volume_ml']}ml"
                     send_telegram_message(chat_id, msg)
             else:
-                # Produto não encontrado - lista sugestões
-                url_lista = f"{SUPABASE_URL}/rest/v1/inventory?select=product_name&order=product_name.asc"
-                resp_lista = requests.get(url_lista, headers=headers, timeout=10)
-                if resp_lista.status_code == 200:
-                    todos_produtos = [p["product_name"] for p in resp_lista.json()]
-                    sugestoes = ", ".join(todos_produtos[:10])
-                    send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado.\n\n📋 Produtos disponíveis: {sugestoes}\n\nUse `/estoque <nome>` para consultar um específico.")
-                else:
-                    send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado no estoque.\n\nUse `/estoque_resumo` para ver todos os produtos.")
+                send_telegram_message(chat_id, f"❌ Produto '{product}' não encontrado.\n\nUse `/estoque_resumo` para ver todos os produtos disponíveis.")
         else:
             send_telegram_message(chat_id, f"❌ Erro ao consultar estoque: {response.status_code}")
     except Exception as e:
