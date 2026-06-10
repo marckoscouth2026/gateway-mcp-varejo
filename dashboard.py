@@ -1,12 +1,12 @@
 import streamlit as st
 import requests
-import pandas as pd
 from datetime import datetime
 
 # ========== CONFIGURAÇÕES ==========
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://seu-projeto.supabase.co")
-SUPABASE_KEY = st.secrets.get("SUPABASE_SERVICE_KEY", "sua-chave")
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://ofcejjyvpaflekkzrhll.supabase.co")
+SUPABASE_KEY = st.secrets.get("SUPABASE_SERVICE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mY2Vqanl2cGFmbGVra3pyaGxsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTAwMDYwNCwiZXhwIjoyMDk2NTc2NjA0fQ.7LUu6N5DSKB_NEjBJ41HQCOd7gkX2eOa0c_EYl4ZuVA
+")
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "acesso2026")
 
 # ========== FUNÇÕES ==========
 def supabase_request(endpoint, method="GET", data=None):
@@ -60,12 +60,6 @@ def deletar_produto(produto_id):
     resp = supabase_request(f"inventory?id=eq.{produto_id}", method="DELETE")
     return resp.status_code in (200, 204) if resp else False
 
-def exportar_csv(produtos):
-    df = pd.DataFrame(produtos)
-    df['preco'] = df['price_cents'] / 100
-    df['gelada'] = df['is_cold'].map({True: 'Sim', False: 'Não'})
-    return df.to_csv(index=False)
-
 # ========== AUTENTICAÇÃO ==========
 st.set_page_config(page_title="Gateway MCP - Estoque", page_icon="🍺", layout="wide")
 
@@ -97,21 +91,25 @@ if pagina == "📊 Dashboard":
     
     produtos = carregar_produtos()
     if produtos:
-        df = pd.DataFrame(produtos)
-        df['preco'] = df['price_cents'] / 100
+        total_produtos = len(produtos)
+        total_estoque = sum(p['quantity'] for p in produtos)
+        valor_total = sum(p['quantity'] * (p['price_cents'] / 100) for p in produtos)
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total de Produtos", len(df))
-        col2.metric("Total em Estoque", f"{df['quantity'].sum()} un")
-        col3.metric("Valor Total", f"R$ {(df['quantity'] * df['preco']).sum():.2f}")
+        col1.metric("Total de Produtos", total_produtos)
+        col2.metric("Total em Estoque", f"{total_estoque} un")
+        col3.metric("Valor Total", f"R$ {valor_total:.2f}")
         
-        st.subheader("📊 Estoque por Produto")
-        st.bar_chart(df.set_index('product_name')['quantity'])
+        st.subheader("📊 Produtos")
+        for p in produtos:
+            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+            st.write(f"🍺 **{p['product_name']}** - {p['quantity']} un - R$ {p['price_cents']/100:.2f} - {gelado}")
         
         st.subheader("🍺 Produtos com Baixo Estoque")
-        baixo_estoque = df[df['quantity'] < 10]
-        if len(baixo_estoque) > 0:
-            st.dataframe(baixo_estoque[['product_name', 'quantity', 'preco']])
+        baixo_estoque = [p for p in produtos if p['quantity'] < 10]
+        if baixo_estoque:
+            for p in baixo_estoque:
+                st.warning(f"🍺 **{p['product_name']}** - apenas {p['quantity']} unidades")
         else:
             st.info("Nenhum produto com estoque baixo.")
     else:
@@ -123,37 +121,25 @@ elif pagina == "📦 Estoque":
     
     produtos = carregar_produtos()
     if produtos:
-        df = pd.DataFrame(produtos)
-        df['preco'] = df['price_cents'] / 100
-        df['gelada'] = df['is_cold'].map({True: '🌡️ Gelada', False: '❄️ Ambiente'})
-        
-        st.dataframe(
-            df[['product_name', 'brand', 'volume_ml', 'quantity', 'preco', 'gelada']],
-            use_container_width=True
-        )
-        
-        st.subheader("✏️ Editar Quantidade")
-        produto_selecionado = st.selectbox("Selecione o produto", df['product_name'].tolist())
-        produto_id = df[df['product_name'] == produto_selecionado]['id'].values[0]
-        quantidade_atual = df[df['product_name'] == produto_selecionado]['quantity'].values[0]
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            nova_quantidade = st.number_input("Nova quantidade", min_value=0, value=int(quantidade_atual))
-            if st.button("Atualizar"):
-                if atualizar_produto(produto_id, nova_quantidade):
-                    st.success("Estoque atualizado!")
-                    st.rerun()
-                else:
-                    st.error("Erro ao atualizar")
-        
-        with col2:
-            if st.button("🗑️ Deletar Produto", type="secondary"):
-                if deletar_produto(produto_id):
-                    st.success("Produto deletado!")
-                    st.rerun()
-                else:
-                    st.error("Erro ao deletar")
+        for p in produtos:
+            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+            with st.expander(f"🍺 {p['product_name']}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Marca:** {p['brand']}")
+                    st.write(f"**Volume:** {p['volume_ml']}ml")
+                    st.write(f"**Preço:** R$ {p['price_cents']/100:.2f}")
+                    st.write(f"**Status:** {gelado}")
+                with col2:
+                    nova_qtd = st.number_input("Quantidade", min_value=0, value=int(p['quantity']), key=f"qtd_{p['id']}")
+                    if st.button("Atualizar", key=f"update_{p['id']}"):
+                        if atualizar_produto(p['id'], nova_qtd):
+                            st.success("Estoque atualizado!")
+                            st.rerun()
+                    if st.button("🗑️ Deletar", key=f"delete_{p['id']}"):
+                        if deletar_produto(p['id']):
+                            st.success("Produto deletado!")
+                            st.rerun()
     else:
         st.info("Nenhum produto cadastrado.")
 
@@ -192,21 +178,22 @@ elif pagina == "📈 Relatórios":
     
     produtos = carregar_produtos()
     if produtos:
-        df = pd.DataFrame(produtos)
-        df['preco'] = df['price_cents'] / 100
+        # Tabela simples
+        st.subheader("📋 Lista de Produtos")
+        for p in produtos:
+            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+            st.write(f"🍺 **{p['product_name']}** | {p['brand']} | {p['volume_ml']}ml | {p['quantity']} un | R$ {p['price_cents']/100:.2f} | {gelado}")
         
-        st.subheader("📊 Gráfico de Estoque")
-        st.bar_chart(df.set_index('product_name')['quantity'])
-        
-        st.subheader("💰 Valor por Produto")
-        df['valor_total'] = df['quantity'] * df['preco']
-        st.bar_chart(df.set_index('product_name')['valor_total'])
-        
+        # Exportar
         st.subheader("📥 Exportar Dados")
-        csv = exportar_csv(produtos)
+        csv_data = "produto,marca,volume,quantidade,preco,gelada\n"
+        for p in produtos:
+            gelada = "sim" if p["is_cold"] else "nao"
+            csv_data += f"{p['product_name']},{p['brand']},{p['volume_ml']},{p['quantity']},{p['price_cents']/100:.2f},{gelada}\n"
+        
         st.download_button(
             label="📥 Baixar CSV",
-            data=csv,
+            data=csv_data,
             file_name=f"estoque_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
