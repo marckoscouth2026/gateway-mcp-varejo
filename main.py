@@ -151,32 +151,59 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         # ========== CALLBACKS ==========
+        # ========== CALLBACKS ==========
         elif "callback_query" in body:
             cb = body["callback_query"]
             chat_id = cb["message"]["chat"]["id"]
             data = cb["data"]
             callback_id = cb["id"]
             
-            print(f"Callback recebido: {data}")
+            print(f"Callback recebido: {data} - chat_id: {chat_id}")
             
-            # Responde o callback (remove loading)
-            try:
-                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-                requests.post(url, json={"callback_query_id": callback_id}, timeout=5)
-            except Exception as e:
-                print(f"Erro answer: {e}")
+            # Responde o callback imediatamente (remove o "loading" do botão)
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+            requests.post(url, json={"callback_query_id": callback_id}, timeout=5)
             
+            # Processa a ação chamando diretamente (sem background_tasks para teste)
             if data == "estoque_resumo":
-                background_tasks.add_task(process_estoque_resumo, chat_id)
+                print("Processando resumo...")
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                url_db = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+                response = requests.get(url_db, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    produtos = response.json()
+                    if produtos:
+                        msg = "*📦 RESUMO DO ESTOQUE*\n\n"
+                        for p in produtos:
+                            gelado_emoji = "❄️" if p["is_cold"] else "🌡️"
+                            msg += f"{gelado_emoji} *{p['product_name']}*: {p['quantity']} un\n"
+                        send_telegram_message(chat_id, msg)
+                    else:
+                        send_telegram_message(chat_id, "📦 Estoque vazio.")
+                else:
+                    send_telegram_message(chat_id, "❌ Erro ao buscar estoque.")
+            
             elif data == "estoque_completo":
-                background_tasks.add_task(process_estoque_completo, chat_id)
+                print("Processando completo...")
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                url_db = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+                response = requests.get(url_db, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    produtos = response.json()
+                    if produtos:
+                        msg = "*📦 ESTOQUE COMPLETO*\n\n"
+                        for p in produtos:
+                            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                            msg += (f"🍺 *{p['product_name']}*\n"
+                                   f"   🏷️ {p['brand']} | 📏 {p['volume_ml']}ml\n"
+                                   f"   📦 {p['quantity']} un | 💰 R$ {p['price_cents']/100:.2f}\n"
+                                   f"   {gelado}\n\n")
+                        if len(msg) > 4000:
+                            msg = msg[:4000] + "\n\n... (mais produtos)"
+                        send_telegram_message(chat_id, msg)
+                    else:
+                        send_telegram_message(chat_id, "📦 Estoque vazio!")
+                else:
+                    send_telegram_message(chat_id, "❌ Erro ao buscar estoque.")
             
             return {"ok": True}
-
-    except Exception as e:
-        print(f"Erro geral: {e}")
-    return {"ok": True}
-
-@app.get("/")
-def root():
-    return {"status": "ok"}
