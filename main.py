@@ -20,9 +20,11 @@ try:
 except ValueError:
     ADMIN_CHAT_ID = 0
 
-def send_telegram_message(chat_id: int, text: str):
+def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
@@ -50,6 +52,62 @@ def process_inventory_query(chat_id: int, product: str):
     except Exception as e:
         send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
 
+def process_estoque_resumo(chat_id: int):
+    try:
+        headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            produtos = response.json()
+            if not produtos:
+                send_telegram_message(chat_id, "📦 Estoque vazio.")
+                return
+            msg = "*📦 RESUMO DO ESTOQUE*\n\n"
+            for p in produtos:
+                gelado_emoji = "❄️" if p["is_cold"] else "🌡️"
+                msg += f"{gelado_emoji} *{p['product_name']}*: {p['quantity']} un\n"
+            send_telegram_message(chat_id, msg)
+        else:
+            send_telegram_message(chat_id, f"❌ Erro: {response.status_code}")
+    except Exception as e:
+        send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
+
+def process_estoque_completo(chat_id: int):
+    try:
+        headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            produtos = response.json()
+            if not produtos:
+                send_telegram_message(chat_id, "📦 Estoque vazio!")
+                return
+            msg = "*📦 ESTOQUE COMPLETO*\n\n"
+            for p in produtos:
+                gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                msg += (f"🍺 *{p['product_name']}*\n"
+                       f"   🏷️ {p['brand']} | 📏 {p['volume_ml']}ml\n"
+                       f"   📦 {p['quantity']} un | 💰 R$ {p['price_cents']/100:.2f}\n"
+                       f"   {gelado}\n\n")
+            if len(msg) > 4000:
+                msg = msg[:4000] + "\n\n... (mais produtos)"
+            send_telegram_message(chat_id, msg)
+        else:
+            send_telegram_message(chat_id, f"❌ Erro: {response.status_code}")
+    except Exception as e:
+        send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
+
+# ========== TECLADO ==========
+def build_main_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📦 Resumo do Estoque", "callback_data": "estoque_resumo"},
+                {"text": "📋 Estoque Completo", "callback_data": "estoque_completo"}
+            ]
+        ]
+    }
+
 @app.post("/telegram/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -71,15 +129,52 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if ADMIN_CHAT_ID != 0 and chat_id != ADMIN_CHAT_ID:
             return {"ok": True}
 
-        if text.startswith("/estoque"):
+        # ========== COMANDOS ==========
+        if text == "/menu" or text == "/start":
+            send_telegram_message(chat_id, "🤖 *Menu Principal*\n\nEscolha uma opção:", reply_markup=build_main_keyboard())
+            return {"ok": True}
+
+        elif text == "/estoque_resumo":
+            background_tasks.add_task(process_estoque_resumo, chat_id)
+            return {"ok": True}
+
+        elif text == "/estoque_completo":
+            background_tasks.add_task(process_estoque_completo, chat_id)
+            return {"ok": True}
+
+        elif text.startswith("/estoque"):
             product = text.replace("/estoque", "").strip()
             if product:
                 background_tasks.add_task(process_inventory_query, chat_id, product)
             else:
                 send_telegram_message(chat_id, "Use: /estoque <produto>")
+            return {"ok": True}
+
+        # ========== CALLBACKS ==========
+        elif "callback_query" in body:
+            cb = body["callback_query"]
+            chat_id = cb["message"]["chat"]["id"]
+            data = cb["data"]
+            callback_id = cb["id"]
+            
+            print(f"Callback recebido: {data}")
+            
+            # Responde o callback (remove loading)
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                requests.post(url, json={"callback_query_id": callback_id}, timeout=5)
+            except Exception as e:
+                print(f"Erro answer: {e}")
+            
+            if data == "estoque_resumo":
+                background_tasks.add_task(process_estoque_resumo, chat_id)
+            elif data == "estoque_completo":
+                background_tasks.add_task(process_estoque_completo, chat_id)
+            
+            return {"ok": True}
 
     except Exception as e:
-        print(f"Erro: {e}")
+        print(f"Erro geral: {e}")
     return {"ok": True}
 
 @app.get("/")
