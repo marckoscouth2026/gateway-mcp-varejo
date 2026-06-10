@@ -151,7 +151,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         # ========== CALLBACKS ==========
-        # ========== CALLBACKS ==========
         elif "callback_query" in body:
             cb = body["callback_query"]
             chat_id = cb["message"]["chat"]["id"]
