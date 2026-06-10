@@ -346,7 +346,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
             return {"ok": True}
 
-        # ========== CALLBACK QUERIES (CLIQUES NOS BOTÕES) ==========
                # ========== CALLBACK QUERIES (CLIQUES NOS BOTÕES) ==========
         elif "callback_query" in body:
             cb = body["callback_query"]
@@ -354,44 +353,146 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             data = cb["data"]
             callback_id = cb["id"]
             
-            print(f"Callback recebido: data={data}, chat_id={chat_id}")
+            print(f"Callback recebido: {data}")
             
-            # Responde imediatamente para o Telegram (remove o "loading")
+            # Responde o callback imediatamente (remove o "loading")
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-                requests.post(url, json={"callback_query_id": callback_id, "text": "Processando..."}, timeout=5)
+                requests.post(url, json={"callback_query_id": callback_id}, timeout=5)
             except Exception as e:
                 print(f"Erro ao responder callback: {e}")
             
-            # Processa cada ação
+            # Processa cada ação DIRETAMENTE (sem background tasks)
             if data == "estoque_resumo":
-                process_estoque_resumo(chat_id)
+                try:
+                    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+                    response = requests.get(url, headers=headers, timeout=15)
+                    
+                    if response.status_code == 200:
+                        produtos = response.json()
+                        if not produtos:
+                            send_telegram_message(chat_id, "📦 Estoque vazio.")
+                            return {"ok": True}
+                        
+                        msg = "*📦 RESUMO DO ESTOQUE*\n\n"
+                        for p in produtos:
+                            gelado_emoji = "❄️" if p["is_cold"] else "🌡️"
+                            msg += f"{gelado_emoji} *{p['product_name']}*: {p['quantity']} un\n"
+                        send_telegram_message(chat_id, msg)
+                    else:
+                        send_telegram_message(chat_id, f"❌ Erro ao buscar estoque: {response.status_code}")
+                except Exception as e:
+                    send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
             
             elif data == "estoque_completo":
-                process_estoque_completo(chat_id)
+                try:
+                    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+                    response = requests.get(url, headers=headers, timeout=15)
+                    
+                    if response.status_code == 200:
+                        produtos = response.json()
+                        if not produtos:
+                            send_telegram_message(chat_id, "📦 Estoque vazio!")
+                            return {"ok": True}
+                        
+                        msg = "*📦 ESTOQUE COMPLETO*\n\n"
+                        for p in produtos:
+                            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                            msg += (f"🍺 *{p['product_name']}*\n"
+                                   f"   🏷️ {p['brand']} | 📏 {p['volume_ml']}ml\n"
+                                   f"   📦 {p['quantity']} un | 💰 R$ {p['price_cents']/100:.2f}\n"
+                                   f"   {gelado}\n\n")
+                        
+                        if len(msg) > 4000:
+                            msg = msg[:4000] + "\n\n... (mais produtos)"
+                        send_telegram_message(chat_id, msg)
+                    else:
+                        send_telegram_message(chat_id, f"❌ Erro ao buscar estoque: {response.status_code}")
+                except Exception as e:
+                    send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
             
             elif data == "consultar_produto":
-                send_telegram_message(chat_id, "🔍 *Consultar Produto*\n\nEscolha um produto abaixo:", reply_markup=build_produtos_keyboard())
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "🍺 Heineken", "callback_data": "produto|Heineken"},
+                         {"text": "🍺 Original", "callback_data": "produto|Original"}],
+                        [{"text": "🍺 Brahma", "callback_data": "produto|Brahma"},
+                         {"text": "🍺 Skol", "callback_data": "produto|Skol"}],
+                        [{"text": "🍺 Stella Artois", "callback_data": "produto|Stella Artois"},
+                         {"text": "🍺 Colorado", "callback_data": "produto|Colorado"}],
+                        [{"text": "🔍 Digitar outro...", "callback_data": "digitar_produto"},
+                         {"text": "🔙 Voltar", "callback_data": "menu_principal"}]
+                    ]
+                }
+                send_telegram_message(chat_id, "🔍 *Consultar Produto*\n\nEscolha um produto:", reply_markup=keyboard)
             
             elif data.startswith("produto|"):
                 produto = data.split("|")[1]
-                process_inventory_query(chat_id, produto)
+                # Consulta o produto diretamente
+                try:
+                    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    url = f"{SUPABASE_URL}/rest/v1/inventory?product_name=ilike.*{produto}*"
+                    response = requests.get(url, headers=headers, timeout=15)
+                    
+                    if response.status_code == 200:
+                        produtos = response.json()
+                        if not produtos:
+                            send_telegram_message(chat_id, f"❌ Produto '{produto}' não encontrado.")
+                            return {"ok": True}
+                        
+                        if len(produtos) > 1:
+                            msg = f"🔍 *Produtos encontrados para '{produto}':*\n\n"
+                            for p in produtos:
+                                gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                                msg += f"🍺 *{p['product_name']}* - {p['quantity']} un | R$ {p['price_cents']/100:.2f} | {gelado}\n"
+                            send_telegram_message(chat_id, msg)
+                        else:
+                            p = produtos[0]
+                            cold = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
+                            msg = (f"🍺 *{p['product_name']}* {cold}\n"
+                                   f"📦 Estoque: {p['quantity']} un\n"
+                                   f"💰 Preço: R$ {p['price_cents']/100:.2f}")
+                            if p.get("brand"):
+                                msg += f"\n🏷️ Marca: {p['brand']}"
+                            if p.get("volume_ml"):
+                                msg += f"\n📏 Volume: {p['volume_ml']}ml"
+                            send_telegram_message(chat_id, msg)
+                    else:
+                        send_telegram_message(chat_id, f"❌ Erro: {response.status_code}")
+                except Exception as e:
+                    send_telegram_message(chat_id, f"❌ Erro: {str(e)}")
             
             elif data == "digitar_produto":
                 send_telegram_message(chat_id, "📝 Digite o nome do produto que deseja consultar (ex: Heineken):")
             
             elif data == "ajuda":
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "📦 Resumo", "callback_data": "estoque_resumo"},
+                         {"text": "📋 Completo", "callback_data": "estoque_completo"}],
+                        [{"text": "🔍 Consultar", "callback_data": "consultar_produto"},
+                         {"text": "🔙 Voltar", "callback_data": "menu_principal"}]
+                    ]
+                }
                 send_telegram_message(chat_id, 
                     "🤖 *Comandos disponíveis*\n\n"
-                    "/estoque <produto> - Consultar produto\n"
-                    "/estoque_resumo - Resumo do estoque\n"
-                    "/estoque_completo - Lista completa\n"
-                    "/adicionar_produto - Adicionar produto (admin)\n"
-                    "/atualizar_estoque - Atualizar estoque (admin)",
-                    reply_markup=build_main_keyboard())
+                    "• /estoque <produto> - Consultar\n"
+                    "• /estoque_resumo - Resumo\n"
+                    "• /estoque_completo - Completo",
+                    reply_markup=keyboard)
             
             elif data == "menu_principal":
-                send_telegram_message(chat_id, "🤖 *Menu Principal*\n\nEscolha uma opção:", reply_markup=build_main_keyboard())
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "📦 Resumo do Estoque", "callback_data": "estoque_resumo"},
+                         {"text": "📋 Estoque Completo", "callback_data": "estoque_completo"}],
+                        [{"text": "🔍 Consultar Produto", "callback_data": "consultar_produto"},
+                         {"text": "❓ Ajuda", "callback_data": "ajuda"}]
+                    ]
+                }
+                send_telegram_message(chat_id, "🤖 *Menu Principal*\n\nEscolha uma opção:", reply_markup=keyboard)
             
             return {"ok": True}
         # ========== PROCESSAMENTO DE MENSAGENS EM LINGUAGEM NATURAL ==========
