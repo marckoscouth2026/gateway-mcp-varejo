@@ -7,10 +7,6 @@ SUPABASE_URL = st.secrets.get("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
 
-# ========== DEBUG: Mostrar configurações (remover depois) ==========
-st.sidebar.write(f"URL: {SUPABASE_URL[:30]}..." if SUPABASE_URL else "URL não configurada")
-st.sidebar.write(f"Key: {SUPABASE_KEY[:20]}..." if SUPABASE_KEY else "Key não configurada")
-
 # Verifica se as configurações estão corretas
 if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("❌ Configuração do Supabase não encontrada. Verifique os secrets.")
@@ -37,7 +33,7 @@ def supabase_request(endpoint, method="GET", data=None):
             return None
         return resp
     except Exception as e:
-        st.error(f"Erro na requisição: {e}")
+        st.error(f"Erro na conexão: {e}")
         return None
 
 def carregar_produtos():
@@ -46,7 +42,7 @@ def carregar_produtos():
         return resp.json()
     else:
         if resp:
-            st.error(f"Erro ao carregar produtos: {resp.status_code} - {resp.text[:200]}")
+            st.error(f"Erro {resp.status_code}: {resp.text[:200]}")
         return []
 
 def adicionar_produto(nome, marca, volume, qtd, preco, gelada):
@@ -70,7 +66,7 @@ def adicionar_produto(nome, marca, volume, qtd, preco, gelada):
         return True, "Sucesso"
     else:
         erro = resp.text if resp else "Sem resposta"
-        return False, f"Erro {resp.status_code if resp else 'conexão'}: {erro[:100]}"
+        return False, f"Erro: {erro[:100]}"
 
 def atualizar_produto(produto_id, quantidade):
     data = {"quantity": quantidade, "last_updated": datetime.now().isoformat()}
@@ -121,12 +117,12 @@ if pagina == "📊 Dashboard":
         col2.metric("Total em Estoque", f"{total_estoque} un")
         col3.metric("Valor Total", f"R$ {valor_total:.2f}")
         
-        st.subheader("📊 Produtos")
+        st.subheader("📋 Lista de Produtos")
         for p in produtos:
             gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
             st.write(f"🍺 **{p['product_name']}** - {p['quantity']} un - R$ {p['price_cents']/100:.2f} - {gelado}")
         
-        st.subheader("🍺 Produtos com Baixo Estoque")
+        st.subheader("⚠️ Produtos com Baixo Estoque")
         baixo_estoque = [p for p in produtos if p['quantity'] < 10]
         if baixo_estoque:
             for p in baixo_estoque:
@@ -134,7 +130,7 @@ if pagina == "📊 Dashboard":
         else:
             st.info("Nenhum produto com estoque baixo.")
     else:
-        st.warning("⚠️ Nenhum produto encontrado no banco de dados. Use o Telegram para adicionar produtos.")
+        st.warning("⚠️ Nenhum produto encontrado. Use o Telegram para adicionar produtos.")
 
 # ========== ESTOQUE ==========
 elif pagina == "📦 Estoque":
@@ -162,7 +158,7 @@ elif pagina == "📦 Estoque":
                             st.success("Produto deletado!")
                             st.rerun()
     else:
-        st.warning("⚠️ Nenhum produto encontrado. Adicione produtos pelo Telegram.")
+        st.warning("⚠️ Nenhum produto encontrado.")
 
 # ========== ADICIONAR PRODUTO ==========
 elif pagina == "➕ Adicionar Produto":
