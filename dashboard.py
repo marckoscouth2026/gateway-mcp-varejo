@@ -3,13 +3,17 @@ import requests
 from datetime import datetime
 
 # ========== CONFIGURAÇÕES ==========
-SUPABASE_URL = st.secrets.get("SUPABASE_URL")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("❌ Configuração do Supabase não encontrada.")
-    st.stop()
+# Tentar ler dos secrets, se não existir, usar valores diretos
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
+except:
+    # Fallback para teste (remova depois que funcionar)
+    SUPABASE_URL = "https://ofcejjyvpaflekkzrhll.supabase.co"
+    SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mY2Vqanl2cGFmbGVra3pyaGxsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTAwMDYwNCwiZXhwIjoyMDk2NTc2NjA0fQ.7LUu6N5DSKB_NEjBJ41HQC0d7gkX2e0a0c_EY14ZuVA"
+    ADMIN_PASSWORD = "admin123"
+    st.warning("Usando configurações padrão (não secrets)")
 
 # ========== FUNÇÕES ==========
 def supabase_request(endpoint, method="GET", data=None):
@@ -26,12 +30,11 @@ def supabase_request(endpoint, method="GET", data=None):
             resp = requests.post(url, json=data, headers=headers, timeout=30)
         elif method == "PATCH":
             resp = requests.patch(url, json=data, headers=headers, timeout=30)
-        elif method == "DELETE":
-            resp = requests.delete(url, headers=headers, timeout=30)
         else:
             return None
         return resp
     except Exception as e:
+        st.error(f"Erro: {e}")
         return None
 
 def carregar_produtos():
@@ -64,17 +67,12 @@ if not st.session_state.authenticated:
 st.sidebar.title("🍺 Gateway MCP")
 st.sidebar.markdown("---")
 
-# DEBUG: Mostrar informações de conexão
-st.sidebar.write("### 🔧 Debug")
-st.sidebar.write(f"URL: {SUPABASE_URL[:30]}..." if SUPABASE_URL else "URL vazia")
-st.sidebar.write(f"Key: {SUPABASE_KEY[:20]}..." if SUPABASE_KEY else "Key vazia")
-
-# Testar conexão diretamente
+# Mostrar status da conexão
 test_resp = supabase_request("inventory?limit=1")
-if test_resp:
-    st.sidebar.success(f"✅ Conexão OK (status {test_resp.status_code})")
+if test_resp and test_resp.status_code == 200:
+    st.sidebar.success("✅ Conectado ao Supabase")
 else:
-    st.sidebar.error("❌ Falha na conexão")
+    st.sidebar.error("❌ Falha na conexão com Supabase")
 
 pagina = st.sidebar.radio(
     "Navegação",
@@ -86,9 +84,6 @@ if pagina == "📊 Dashboard":
     st.title("📊 Dashboard de Estoque")
     
     produtos = carregar_produtos()
-    
-    # DEBUG: Mostrar quantos produtos foram encontrados
-    st.info(f"🔍 Encontrados {len(produtos)} produtos no banco")
     
     if produtos:
         total_produtos = len(produtos)
@@ -105,7 +100,7 @@ if pagina == "📊 Dashboard":
             gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
             st.write(f"🍺 **{p['product_name']}** - {p['quantity']} un - R$ {p['price_cents']/100:.2f} - {gelado}")
     else:
-        st.warning("⚠️ Nenhum produto encontrado. Use o Telegram para adicionar produtos.")
+        st.warning("⚠️ Nenhum produto encontrado. Use o Telegram para adicionar produtos (ex: /adicionar Skol|Ambev|350|12|400|false)")
 
 # ========== ESTOQUE ==========
 elif pagina == "📦 Estoque":
@@ -114,14 +109,13 @@ elif pagina == "📦 Estoque":
     produtos = carregar_produtos()
     if produtos:
         for p in produtos:
-            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
             with st.expander(f"🍺 {p['product_name']}"):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Marca:** {p['brand']}")
                     st.write(f"**Volume:** {p['volume_ml']}ml")
                     st.write(f"**Preço:** R$ {p['price_cents']/100:.2f}")
-                    st.write(f"**Status:** {gelado}")
+                    st.write(f"**Gelada:** {'Sim' if p['is_cold'] else 'Não'}")
                 with col2:
                     nova_qtd = st.number_input("Quantidade", min_value=0, value=int(p['quantity']), key=f"qtd_{p['id']}")
                     if st.button("Atualizar", key=f"update_{p['id']}"):
@@ -132,13 +126,6 @@ elif pagina == "📦 Estoque":
                             st.rerun()
                         else:
                             st.error("Erro ao atualizar")
-                    if st.button("🗑️ Deletar", key=f"delete_{p['id']}"):
-                        resp = supabase_request(f"inventory?id=eq.{p['id']}", method="DELETE")
-                        if resp and resp.status_code in (200, 204):
-                            st.success("Produto deletado!")
-                            st.rerun()
-                        else:
-                            st.error("Erro ao deletar")
     else:
         st.warning("⚠️ Nenhum produto encontrado.")
 
@@ -146,55 +133,39 @@ elif pagina == "📦 Estoque":
 elif pagina == "➕ Adicionar Produto":
     st.title("➕ Adicionar Novo Produto")
     
-    produtos_existentes = carregar_produtos()
-    if produtos_existentes:
-        st.info(f"📋 Produtos já cadastrados: {', '.join([p['product_name'] for p in produtos_existentes])}")
-    
     with st.form("add_product"):
         col1, col2 = st.columns(2)
         with col1:
             nome = st.text_input("Nome do Produto *")
             marca = st.text_input("Marca")
-            volume = st.number_input("Volume (ml)", min_value=0, step=50)
+            volume = st.number_input("Volume (ml)", min_value=0, step=50, value=350)
         with col2:
-            quantidade = st.number_input("Quantidade inicial", min_value=0, step=1)
-            preco = st.number_input("Preço (R$)", min_value=0.0, step=0.5, format="%.2f")
-            gelada = st.checkbox("Produto Gelado")
+            quantidade = st.number_input("Quantidade inicial", min_value=0, step=1, value=10)
+            preco = st.number_input("Preço (R$)", min_value=0.0, step=0.5, format="%.2f", value=5.00)
+            gelada = st.checkbox("Produto Gelado", value=True)
         
         submitted = st.form_submit_button("💾 Salvar Produto")
         
         if submitted:
             if not nome:
                 st.error("Nome do produto é obrigatório")
-            elif preco <= 0:
-                st.error("Preço deve ser maior que zero")
             else:
-                # Verificar se já existe
-                existe = False
-                for p in produtos_existentes:
-                    if p["product_name"].lower() == nome.lower():
-                        existe = True
-                        break
-                
-                if existe:
-                    st.error(f"❌ Produto '{nome}' já existe!")
+                data = {
+                    "product_name": nome,
+                    "brand": marca,
+                    "volume_ml": volume,
+                    "quantity": quantidade,
+                    "price_cents": int(preco * 100),
+                    "is_cold": gelada,
+                    "last_updated": datetime.now().isoformat()
+                }
+                resp = supabase_request("inventory", method="POST", data=data)
+                if resp and resp.status_code in (200, 201):
+                    st.success(f"✅ Produto '{nome}' adicionado com sucesso!")
+                    st.rerun()
                 else:
-                    data = {
-                        "product_name": nome,
-                        "brand": marca,
-                        "volume_ml": volume,
-                        "quantity": quantidade,
-                        "price_cents": int(preco * 100),
-                        "is_cold": gelada,
-                        "last_updated": datetime.now().isoformat()
-                    }
-                    resp = supabase_request("inventory", method="POST", data=data)
-                    if resp and resp.status_code in (200, 201):
-                        st.success(f"✅ Produto '{nome}' adicionado com sucesso!")
-                        st.rerun()
-                    else:
-                        erro = resp.text if resp else "Sem resposta"
-                        st.error(f"❌ Erro ao adicionar: {erro[:100]}")
+                    erro = resp.text if resp else "Sem resposta"
+                    st.error(f"❌ Erro: {erro[:200]}")
 
 # ========== RELATÓRIOS ==========
 elif pagina == "📈 Relatórios":
@@ -202,12 +173,6 @@ elif pagina == "📈 Relatórios":
     
     produtos = carregar_produtos()
     if produtos:
-        st.subheader("📋 Lista de Produtos")
-        for p in produtos:
-            gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
-            st.write(f"🍺 **{p['product_name']}** | {p['brand']} | {p['volume_ml']}ml | {p['quantity']} un | R$ {p['price_cents']/100:.2f} | {gelado}")
-        
-        st.subheader("📥 Exportar Dados")
         csv_data = "produto,marca,volume,quantidade,preco,gelada\n"
         for p in produtos:
             gelada = "sim" if p["is_cold"] else "nao"
@@ -223,4 +188,4 @@ elif pagina == "📈 Relatórios":
         st.warning("⚠️ Nenhum produto encontrado.")
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"Gateway MCP Varejo | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+st.sidebar.caption(f"Gateway MCP | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
