@@ -2,48 +2,30 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-# ========== CONFIGURAÇÕES ==========
-# Tentar ler dos secrets, se não existir, usar valores diretos
-try:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-    ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
-except:
-    # Fallback para teste (remova depois que funcionar)
-    SUPABASE_URL = "https://ofcejjyvpaflekkzrhll.supabase.co"
-    SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mY2Vqanl2cGFmbGVra3pyaGxsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTAwMDYwNCwiZXhwIjoyMDk2NTc2NjA0fQ.7LUu6N5DSKB_NEjBJ41HQC0d7gkX2e0a0c_EY14ZuVA"
-    ADMIN_PASSWORD = "admin123"
-    st.warning("Usando configurações padrão (não secrets)")
+# ========== CONFIGURAÇÕES (hardcoded para teste - REMOVER DEPOIS) ==========
+# Coloque a URL e KEY exatas do seu Supabase
+SUPABASE_URL = "https://ofcejjyvpaflekkzrhll.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mY2Vqanl2cGFmbGVra3pyaGxsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTAwMDYwNCwiZXhwIjoyMDk2NTc2NjA0fQ.7LUu6N5DSKB_NEjBJ41HQC0d7gkX2e0a0c_EY14ZuVA"
+ADMIN_PASSWORD = "admin123"
 
-# ========== FUNÇÕES ==========
-def supabase_request(endpoint, method="GET", data=None):
+# ========== FUNÇÃO DIRETA ==========
+def carregar_produtos():
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json"
     }
-    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    url = f"{SUPABASE_URL}/rest/v1/inventory?order=product_name.asc"
+    
     try:
-        if method == "GET":
-            resp = requests.get(url, headers=headers, timeout=30)
-        elif method == "POST":
-            resp = requests.post(url, json=data, headers=headers, timeout=30)
-        elif method == "PATCH":
-            resp = requests.patch(url, json=data, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
         else:
-            return None
-        return resp
+            st.error(f"Erro HTTP {response.status_code}: {response.text[:200]}")
+            return []
     except Exception as e:
-        st.error(f"Erro: {e}")
-        return None
-
-def carregar_produtos():
-    resp = supabase_request("inventory?order=product_name.asc")
-    if resp and resp.status_code == 200:
-        return resp.json()
-    else:
-        if resp:
-            st.error(f"Erro {resp.status_code}: {resp.text[:200]}")
+        st.error(f"Erro de conexão: {e}")
         return []
 
 # ========== AUTENTICAÇÃO ==========
@@ -67,12 +49,19 @@ if not st.session_state.authenticated:
 st.sidebar.title("🍺 Gateway MCP")
 st.sidebar.markdown("---")
 
-# Mostrar status da conexão
-test_resp = supabase_request("inventory?limit=1")
-if test_resp and test_resp.status_code == 200:
-    st.sidebar.success("✅ Conectado ao Supabase")
-else:
-    st.sidebar.error("❌ Falha na conexão com Supabase")
+# Teste de conexão
+with st.sidebar:
+    st.write("### 🔧 Status")
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    test_url = f"{SUPABASE_URL}/rest/v1/inventory?limit=1"
+    try:
+        test_resp = requests.get(test_url, headers=headers, timeout=10)
+        if test_resp.status_code == 200:
+            st.success("✅ Conectado ao Supabase")
+        else:
+            st.error(f"❌ Erro {test_resp.status_code}")
+    except Exception as e:
+        st.error(f"❌ Falha: {e}")
 
 pagina = st.sidebar.radio(
     "Navegação",
@@ -84,6 +73,8 @@ if pagina == "📊 Dashboard":
     st.title("📊 Dashboard de Estoque")
     
     produtos = carregar_produtos()
+    
+    st.write(f"**Debug:** Encontrados {len(produtos)} produtos")  # Debug
     
     if produtos:
         total_produtos = len(produtos)
@@ -100,7 +91,7 @@ if pagina == "📊 Dashboard":
             gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
             st.write(f"🍺 **{p['product_name']}** - {p['quantity']} un - R$ {p['price_cents']/100:.2f} - {gelado}")
     else:
-        st.warning("⚠️ Nenhum produto encontrado. Use o Telegram para adicionar produtos (ex: /adicionar Skol|Ambev|350|12|400|false)")
+        st.warning("⚠️ Nenhum produto encontrado.")
 
 # ========== ESTOQUE ==========
 elif pagina == "📦 Estoque":
@@ -119,19 +110,25 @@ elif pagina == "📦 Estoque":
                 with col2:
                     nova_qtd = st.number_input("Quantidade", min_value=0, value=int(p['quantity']), key=f"qtd_{p['id']}")
                     if st.button("Atualizar", key=f"update_{p['id']}"):
+                        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+                        update_url = f"{SUPABASE_URL}/rest/v1/inventory?id=eq.{p['id']}"
                         data = {"quantity": nova_qtd, "last_updated": datetime.now().isoformat()}
-                        resp = supabase_request(f"inventory?id=eq.{p['id']}", method="PATCH", data=data)
-                        if resp and resp.status_code in (200, 204):
+                        resp = requests.patch(update_url, json=data, headers=headers)
+                        if resp.status_code in (200, 204):
                             st.success("Estoque atualizado!")
                             st.rerun()
                         else:
-                            st.error("Erro ao atualizar")
+                            st.error(f"Erro: {resp.status_code}")
     else:
         st.warning("⚠️ Nenhum produto encontrado.")
 
 # ========== ADICIONAR PRODUTO ==========
 elif pagina == "➕ Adicionar Produto":
     st.title("➕ Adicionar Novo Produto")
+    
+    # Carregar produtos existentes para verificar duplicatas
+    produtos_existentes = carregar_produtos()
+    nomes_existentes = [p["product_name"].lower() for p in produtos_existentes]
     
     with st.form("add_product"):
         col1, col2 = st.columns(2)
@@ -149,7 +146,11 @@ elif pagina == "➕ Adicionar Produto":
         if submitted:
             if not nome:
                 st.error("Nome do produto é obrigatório")
+            elif nome.lower() in nomes_existentes:
+                st.error(f"❌ Produto '{nome}' já existe!")
             else:
+                headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+                url = f"{SUPABASE_URL}/rest/v1/inventory"
                 data = {
                     "product_name": nome,
                     "brand": marca,
@@ -159,13 +160,12 @@ elif pagina == "➕ Adicionar Produto":
                     "is_cold": gelada,
                     "last_updated": datetime.now().isoformat()
                 }
-                resp = supabase_request("inventory", method="POST", data=data)
-                if resp and resp.status_code in (200, 201):
+                resp = requests.post(url, json=data, headers=headers)
+                if resp.status_code in (200, 201):
                     st.success(f"✅ Produto '{nome}' adicionado com sucesso!")
                     st.rerun()
                 else:
-                    erro = resp.text if resp else "Sem resposta"
-                    st.error(f"❌ Erro: {erro[:200]}")
+                    st.error(f"❌ Erro {resp.status_code}: {resp.text[:200]}")
 
 # ========== RELATÓRIOS ==========
 elif pagina == "📈 Relatórios":
