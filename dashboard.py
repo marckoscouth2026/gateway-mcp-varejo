@@ -7,6 +7,10 @@ SUPABASE_URL = st.secrets.get("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
 
+# ========== DEBUG: Mostrar configurações (remover depois) ==========
+st.sidebar.write(f"URL: {SUPABASE_URL[:30]}..." if SUPABASE_URL else "URL não configurada")
+st.sidebar.write(f"Key: {SUPABASE_KEY[:20]}..." if SUPABASE_KEY else "Key não configurada")
+
 # Verifica se as configurações estão corretas
 if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("❌ Configuração do Supabase não encontrada. Verifique os secrets.")
@@ -22,27 +26,36 @@ def supabase_request(endpoint, method="GET", data=None):
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
     try:
         if method == "GET":
-            resp = requests.get(url, headers=headers)
+            resp = requests.get(url, headers=headers, timeout=30)
         elif method == "POST":
-            resp = requests.post(url, json=data, headers=headers)
+            resp = requests.post(url, json=data, headers=headers, timeout=30)
         elif method == "PATCH":
-            resp = requests.patch(url, json=data, headers=headers)
+            resp = requests.patch(url, json=data, headers=headers, timeout=30)
         elif method == "DELETE":
-            resp = requests.delete(url, headers=headers)
+            resp = requests.delete(url, headers=headers, timeout=30)
         else:
             return None
         return resp
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro na requisição: {e}")
         return None
 
 def carregar_produtos():
     resp = supabase_request("inventory?order=product_name.asc")
     if resp and resp.status_code == 200:
         return resp.json()
-    return []
+    else:
+        if resp:
+            st.error(f"Erro ao carregar produtos: {resp.status_code} - {resp.text[:200]}")
+        return []
 
 def adicionar_produto(nome, marca, volume, qtd, preco, gelada):
+    # Verificar se produto já existe
+    produtos = carregar_produtos()
+    for p in produtos:
+        if p["product_name"].lower() == nome.lower():
+            return False, "Produto já existe"
+    
     data = {
         "product_name": nome,
         "brand": marca,
@@ -53,7 +66,11 @@ def adicionar_produto(nome, marca, volume, qtd, preco, gelada):
         "last_updated": datetime.now().isoformat()
     }
     resp = supabase_request("inventory", method="POST", data=data)
-    return resp.status_code in (200, 201) if resp else False
+    if resp and resp.status_code in (200, 201):
+        return True, "Sucesso"
+    else:
+        erro = resp.text if resp else "Sem resposta"
+        return False, f"Erro {resp.status_code if resp else 'conexão'}: {erro[:100]}"
 
 def atualizar_produto(produto_id, quantidade):
     data = {"quantity": quantidade, "last_updated": datetime.now().isoformat()}
@@ -117,7 +134,7 @@ if pagina == "📊 Dashboard":
         else:
             st.info("Nenhum produto com estoque baixo.")
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.warning("⚠️ Nenhum produto encontrado no banco de dados. Use o Telegram para adicionar produtos.")
 
 # ========== ESTOQUE ==========
 elif pagina == "📦 Estoque":
@@ -145,11 +162,16 @@ elif pagina == "📦 Estoque":
                             st.success("Produto deletado!")
                             st.rerun()
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.warning("⚠️ Nenhum produto encontrado. Adicione produtos pelo Telegram.")
 
 # ========== ADICIONAR PRODUTO ==========
 elif pagina == "➕ Adicionar Produto":
     st.title("➕ Adicionar Novo Produto")
+    
+    # Mostrar produtos existentes para referência
+    produtos_existentes = carregar_produtos()
+    if produtos_existentes:
+        st.info(f"📋 Produtos já cadastrados: {', '.join([p['product_name'] for p in produtos_existentes])}")
     
     with st.form("add_product"):
         col1, col2 = st.columns(2)
@@ -170,11 +192,12 @@ elif pagina == "➕ Adicionar Produto":
             elif preco <= 0:
                 st.error("Preço deve ser maior que zero")
             else:
-                if adicionar_produto(nome, marca, volume, quantidade, preco, gelada):
-                    st.success(f"Produto '{nome}' adicionado com sucesso!")
+                sucesso, mensagem = adicionar_produto(nome, marca, volume, quantidade, preco, gelada)
+                if sucesso:
+                    st.success(f"✅ Produto '{nome}' adicionado com sucesso!")
                     st.rerun()
                 else:
-                    st.error("Erro ao adicionar produto")
+                    st.error(f"❌ {mensagem}")
 
 # ========== RELATÓRIOS ==========
 elif pagina == "📈 Relatórios":
@@ -200,7 +223,7 @@ elif pagina == "📈 Relatórios":
             mime="text/csv"
         )
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.warning("⚠️ Nenhum produto encontrado.")
 
 # ========== FOOTER ==========
 st.sidebar.markdown("---")
