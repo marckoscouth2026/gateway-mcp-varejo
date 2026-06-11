@@ -2,11 +2,15 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-# ========== CONFIGURAÇÕES ==========
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://ofcejjyvpaflekkzrhll.supabase.co")
-SUPABASE_KEY = st.secrets.get("SUPABASE_SERVICE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mY2Vqanl2cGFmbGVra3pyaGxsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTAwMDYwNCwiZXhwIjoyMDk2NTc2NjA0fQ.7LUu6N5DSKB_NEjBJ41HQCOd7gkX2eOa0c_EYl4ZuVA
-")
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "acesso2026")
+# ========== CONFIGURAÇÕES (lidas dos secrets) ==========
+SUPABASE_URL = st.secrets.get("SUPABASE_URL")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
+
+# Verifica se as configurações estão corretas
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("❌ Configuração do Supabase não encontrada. Verifique os secrets.")
+    st.stop()
 
 # ========== FUNÇÕES ==========
 def supabase_request(endpoint, method="GET", data=None):
@@ -178,13 +182,11 @@ elif pagina == "📈 Relatórios":
     
     produtos = carregar_produtos()
     if produtos:
-        # Tabela simples
         st.subheader("📋 Lista de Produtos")
         for p in produtos:
             gelado = "🌡️ Gelada" if p["is_cold"] else "❄️ Ambiente"
             st.write(f"🍺 **{p['product_name']}** | {p['brand']} | {p['volume_ml']}ml | {p['quantity']} un | R$ {p['price_cents']/100:.2f} | {gelado}")
         
-        # Exportar
         st.subheader("📥 Exportar Dados")
         csv_data = "produto,marca,volume,quantidade,preco,gelada\n"
         for p in produtos:
