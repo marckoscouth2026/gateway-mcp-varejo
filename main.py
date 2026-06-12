@@ -289,7 +289,113 @@ async def webhook(request: Request):
                     send_message(chat_id, "❌ Colorado não encontrada.")
             
             return {"ok": True}
-        
+                # ========== COMANDOS DE TEXTO (FARMING) ==========
+        if "message" in body and chat_id == ADMIN_CHAT_ID:
+            text = body["message"].get("text", "")
+            
+            # Comando: /farming_status
+            if text.startswith("/farming_status"):
+                try:
+                    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    resp = requests.get(f"{SUPABASE_URL}/rest/v1/farming_accounts?select=agent_id,platform,username,is_active,daily_goal", headers=headers, timeout=15)
+                    
+                    if resp.status_code == 200:
+                        contas = resp.json()
+                        if contas:
+                            msg = "*🌾 FARMING STATUS*\n\n"
+                            for c in contas:
+                                status_icon = "✅" if c["is_active"] else "⏸️"
+                                status_text = "Ativo" if c["is_active"] else "Pausado"
+                                msg += f"{status_icon} *{c['agent_id']}*\n"
+                                msg += f"   📱 {c['platform']} | 👤 {c['username']}\n"
+                                msg += f"   📊 Meta: {c['daily_goal']} ações/dia | {status_text}\n\n"
+                            send_message(chat_id, msg)
+                        else:
+                            send_message(chat_id, "📭 Nenhuma conta de farming cadastrada.\n\nUse `/farming_add` para adicionar.")
+                    else:
+                        send_message(chat_id, f"❌ Erro ao buscar contas: {resp.status_code}")
+                except Exception as e:
+                    send_message(chat_id, f"❌ Erro: {str(e)}")
+                return {"ok": True}
+            
+            # Comando: /farming_add
+            elif text.startswith("/farming_add"):
+                parts = text.replace("/farming_add", "").strip().split("|")
+                if len(parts) != 5:
+                    send_message(chat_id, "📝 *Formato inválido!*\n\nUse:\n`/farming_add agent_id|platform|username|workspace_path|daily_goal`\n\nExemplo:\n`/farming_add insta_oficial|instagram|meu_insta|/workspaces/insta|50`")
+                    return {"ok": True}
+                
+                agent_id, platform, username, workspace_path, daily_goal = parts
+                try:
+                    daily_goal_int = int(daily_goal)
+                    if daily_goal_int <= 0:
+                        raise ValueError
+                except ValueError:
+                    send_message(chat_id, "❌ daily_goal deve ser um número positivo.")
+                    return {"ok": True}
+                
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                check_resp = requests.get(f"{SUPABASE_URL}/rest/v1/farming_accounts?agent_id=eq.{agent_id}", headers=headers)
+                if check_resp.status_code == 200 and check_resp.json():
+                    send_message(chat_id, f"⚠️ Conta '{agent_id}' já existe!")
+                    return {"ok": True}
+                
+                # Criar carteira para o agente
+                requests.post(f"{PROXY_URL}/wallet/balance", params={"agent_id": agent_id, "secret": AUTO_APPROVE_SECRET})
+                
+                data = {
+                    "agent_id": agent_id,
+                    "platform": platform,
+                    "username": username,
+                    "workspace_path": workspace_path,
+                    "daily_goal": daily_goal_int,
+                    "is_active": True
+                }
+                headers["Content-Type"] = "application/json"
+                resp = requests.post(f"{SUPABASE_URL}/rest/v1/farming_accounts", json=data, headers=headers)
+                
+                if resp.status_code in (200, 201):
+                    send_message(chat_id, f"✅ *Conta adicionada com sucesso!*\n\n🆔 Agent ID: `{agent_id}`\n📱 Plataforma: {platform}\n👤 Usuário: {username}\n📊 Meta diária: {daily_goal_int} ações\n\n💰 Carteira criada com saldo R$ 0.")
+                else:
+                    send_message(chat_id, f"❌ Erro ao adicionar conta: {resp.text[:200]}")
+                return {"ok": True}
+            
+            # Comando: /farming_pause
+            elif text.startswith("/farming_pause"):
+                agent_id = text.replace("/farming_pause", "").strip()
+                if not agent_id:
+                    send_message(chat_id, "Use: `/farming_pause <agent_id>`\n\nExemplo: `/farming_pause insta_oficial`")
+                    return {"ok": True}
+                
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}", "Content-Type": "application/json"}
+                resp = requests.patch(f"{SUPABASE_URL}/rest/v1/farming_accounts?agent_id=eq.{agent_id}", json={"is_active": False}, headers=headers)
+                
+                if resp.status_code in (200, 204):
+                    send_message(chat_id, f"⏸️ Conta `{agent_id}` foi *pausada*.\n\nPara reativar, use `/farming_resume {agent_id}`")
+                else:
+                    send_message(chat_id, f"❌ Erro ao pausar: {resp.text[:100]}")
+                return {"ok": True}
+            
+            # Comando: /farming_resume
+            elif text.startswith("/farming_resume"):
+                agent_id = text.replace("/farming_resume", "").strip()
+                if not agent_id:
+                    send_message(chat_id, "Use: `/farming_resume <agent_id>`\n\nExemplo: `/farming_resume insta_oficial`")
+                    return {"ok": True}
+                
+                headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}", "Content-Type": "application/json"}
+                resp = requests.patch(f"{SUPABASE_URL}/rest/v1/farming_accounts?agent_id=eq.{agent_id}", json={"is_active": True}, headers=headers)
+                
+                if resp.status_code in (200, 204):
+                    send_message(chat_id, f"▶️ Conta `{agent_id}` foi *reativada*.")
+                else:
+                    send_message(chat_id, f"❌ Erro ao reativar: {resp.text[:100]}")
+                return {"ok": True}
+            
+            # Comando: /farming_executar
+            elif text.startswith("/farming_executar"):
+                send_message(chat_id, "🔄 *Iniciando execução das ações de farming...*\n\n⚙️ Funcionalidade em desenvolvimento. Em breve, o farming worker será executado automaticamente.")
+                return {"ok": True}
         # ========== COMANDOS DE TEXTO (ADMIN) ==========
         if "message" in body and chat_id == ADMIN_CHAT_ID:
             text = body["message"].get("text", "")
