@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""
+Farming Worker - Executa ações automatizadas para contas de redes sociais
+Compartilha o mesmo Supabase e Agent Auth Proxy do Gateway MCP
+"""
+
+import os
+import sys
+import time
+import random
+import requests
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ========== CONFIGURAÇÕES ==========
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+PROXY_URL = os.getenv("PROXY_URL", "https://gateway-mcp-varejo.onrender.com")
+AUTO_APPROVE_SECRET = os.getenv("AUTO_APPROVE_SECRET")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Custos das ações (em centavos)
+COSTOS = {
+    "like": 1,      # R$ 0,01
+    "follow": 5,    # R$ 0,05
+    "comment": 10,  # R$ 0,10
+    "post": 50,     # R$ 0,50
+}
+
+def send_telegram_message(text):
+    """Envia mensagem para o Telegram (alertas)"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+    except Exception as e:
+        print(f"Erro ao enviar mensagem: {e}")
+
+def supabase_request(endpoint, method="GET", data=None, params=None):
+    """Faz requisição ao Supabase"""
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json"
+    }
+    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    try:
+        if method == "GET":
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+        elif method == "POST":
+            resp = requests.post(url, json=data, headers=headers, timeout=30)
+        elif method == "PATCH":
+            resp = requests.patch(url, json=data, headers=headers, timeout=30)
+        else:
+            return None
+        return resp
+    except Exception as e:
+        print(f"Erro Supabase: {e}")
+        return None
+
+def get_active_accounts():
+    """Busca contas ativas para processamento"""
+    resp = supabase_request("farming_accounts?is_active=eq.true")
+    if resp and resp.status_code == 200:
+        return resp.json()
+    return []
+
+def get_account_balance(agent_id):
+    """Consulta saldo da conta via proxy"""
+    try:
+        url = f"{PROXY_URL}/wallet/balance"
+        params = {"agent_id": agent_id, "secret": AUTO_APPROVE_SECRET}
+        resp = requests.get(url, params=params, timeout=30)
+        if resp.status_code == 200:
+            return resp.json().get("balance", 0)
+        return 0
+    except Exception as e:
+        print(f"Erro ao consultar saldo de {agent_id}: {e}")
+        return 0
+
+def debit_action(agent_id, action_type, target):
+    """Debita o custo da ação da carteira do agente"""
+    cost = COSTOS.get(action_type, 1)
+    try:
+        url = f"{PROXY_URL}/wallet/pay"
+        params = {
+            "agent_id": agent_id,
+            "amount": cost,
+            "description": f"{action_type} em {target}",
+            "secret": AUTO_APPROVE_SECRET
+        }
+        resp = requests.post(url, params=params, timeout=30)
+        return resp.status_code == 200, cost
+    except Exception as e:
+        print(f"Erro ao debitar {agent_id}: {e}")
+        return False, cost
+
+def register_action(agent_id, action_type, target, cost, success, error_msg=None):
+    """Registra a ação na tabela farming_actions"""
+    data = {
+        "agent_id": agent_id,
+        "action_type": action_type,
+        "target": target,
+        "cost_cents": cost,
+        "status": "success" if success else "failed",
+        "error_message": error_msg,
+        "completed_at": datetime.now().isoformat() if success else None
+    }
+    supabase_request("farming_actions", method="POST", data=data)
+
+def execute_action(agent_id, action_type, target):
+    """
+    Executa a ação real (simulação por enquanto)
+    TODO: Implementar com Playwright/Selenium para ações reais
+    """
+    # Simulação de delay aleatório (1-5 segundos)
+    delay = random.uniform(1, 5)
+    time.sleep(delay)
+    
+    # Simular sucesso (95% de taxa de sucesso)
+    success_rate = 0.95
+    return random.random() < success_rate
+
+def update_daily_counter(agent_id):
+    """Atualiza contador diário de ações (opcional)"""
+    # Pode ser implementado se quiser controlar meta diária
+    pass
+
+def process_account(account):
+    """Processa uma conta: executa ações pendentes"""
+    agent_id = account["agent_id"]
+    platform = account["platform"]
+    daily_goal = account.get("daily_goal", 50)
+    
+    print(f"\n📱 Processando conta: {agent_id} ({platform})")
+    print(f"   Meta diária: {daily_goal} ações")
+    
+    # Verificar saldo atual
+    balance = get_account_balance(agent_id)
+    print(f"   Saldo: R$ {balance/100:.2f}")
+    
+    if balance < 10:  # Menos que R$ 0,10
+        print(f"   ⚠️ Saldo baixo! Considere recarregar a carteira.")
+        send_telegram_message(f"⚠️ *Alerta de saldo baixo*\n\nConta `{agent_id}` está com saldo R$ {balance/100:.2f}. Recarregue para continuar as ações.")
+        return
+    
+    # Definir ações a executar (exemplo)
+    acoes = [
+        {"type": "like", "target": f"https://instagram.com/p/exemplo_{random.randint(1,100)}"},
+        {"type": "follow", "target": f"https://instagram.com/usuario_{random.randint(1,50)}"},
+        {"type": "like", "target": f"https://instagram.com/p/exemplo2_{random.randint(1,100)}"},
+    ]
+    
+    actions_executed = 0
+    for acao in acoes:
+        action_type = acao["type"]
+        target = acao["target"]
+        
+        print(f"   🎬 Executando {action_type} em {target}...")
+        
+        # Debita o custo
+        success_debit, cost = debit_action(agent_id, action_type, target)
+        
+        if not success_debit:
+            print(f"      ❌ Falha no débito (saldo ou limite insuficiente)")
+            register_action(agent_id, action_type, target, cost, False, "Saldo ou limite insuficiente")
+            break
+        
+        # Executa ação real
+        success_action = execute_action(agent_id, action_type, target)
+        
+        if success_action:
+            print(f"      ✅ {action_type} concluído! (custo: R$ {cost/100:.2f})")
+            register_action(agent_id, action_type, target, cost, True)
+            actions_executed += 1
+        else:
+            print(f"      ❌ Falha na execução do {action_type}")
+            register_action(agent_id, action_type, target, cost, False, "Falha na execução")
+        
+        # Pausa entre ações para comportamento mais humano
+        time.sleep(random.uniform(3, 8))
+    
+    print(f"   📊 Total de ações executadas: {actions_executed}")
+    
+    # Atualizar saldo final
+    final_balance = get_account_balance(agent_id)
+    print(f"   Saldo final: R$ {final_balance/100:.2f}")
+
+def main():
+    print("="*50)
+    print("🌾 FARMING WORKER")
+    print("="*50)
+    print(f"Data: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Proxy: {PROXY_URL}")
+    
+    # Verificar configurações
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print("❌ Erro: Configuração do Supabase não encontrada.")
+        sys.exit(1)
+    
+    if not AUTO_APPROVE_SECRET:
+        print("❌ Erro: AUTO_APPROVE_SECRET não configurado.")
+        sys.exit(1)
+    
+    # Buscar contas ativas
+    accounts = get_active_accounts()
+    print(f"\n📋 Encontradas {len(accounts)} contas ativas")
+    
+    if not accounts:
+        print("Nenhuma conta ativa para processar.")
+        send_telegram_message("🌾 *Farming Worker*\n\nNenhuma conta ativa encontrada. Adicione contas com `/farming_add`.")
+        return
+    
+    # Processar cada conta
+    total_actions = 0
+    for account in accounts:
+        process_account(account)
+    
+    # Resumo final
+    print("\n" + "="*50)
+    print("✅ Farming Worker concluído!")
+    
+    # Enviar resumo para o Telegram
+    resumo = f"🌾 *Farming Worker*\n\n✅ Execução concluída\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📋 Contas processadas: {len(accounts)}"
+    send_telegram_message(resumo)
+
+if __name__ == "__main__":
+    main()
