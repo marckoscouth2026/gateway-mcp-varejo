@@ -12,6 +12,7 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Carrega variáveis do arquivo .env
 load_dotenv()
 
 # ========== CONFIGURAÇÕES ==========
@@ -23,16 +24,18 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Custos das ações (em centavos)
-COSTOS = {
+CUSTOS = {
     "like": 1,      # R$ 0,01
     "follow": 5,    # R$ 0,05
     "comment": 10,  # R$ 0,10
     "post": 50,     # R$ 0,50
 }
 
+# ========== FUNÇÕES DE SUPORTE ==========
 def send_telegram_message(text):
     """Envia mensagem para o Telegram (alertas)"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram não configurado")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
@@ -41,13 +44,18 @@ def send_telegram_message(text):
         print(f"Erro ao enviar mensagem: {e}")
 
 def supabase_request(endpoint, method="GET", data=None, params=None):
-    """Faz requisição ao Supabase"""
+    """Faz requisição ao Supabase com headers corretos"""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print("❌ Erro: SUPABASE_URL ou SUPABASE_SERVICE_KEY não configurados")
+        return None
+    
     headers = {
         "apikey": SUPABASE_SERVICE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
         "Content-Type": "application/json"
     }
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    
     try:
         if method == "GET":
             resp = requests.get(url, headers=headers, params=params, timeout=30)
@@ -64,13 +72,25 @@ def supabase_request(endpoint, method="GET", data=None, params=None):
 
 def get_active_accounts():
     """Busca contas ativas para processamento"""
+    print("🔍 Buscando contas ativas...")
     resp = supabase_request("farming_accounts?is_active=eq.true")
+    
     if resp and resp.status_code == 200:
-        return resp.json()
-    return []
+        contas = resp.json()
+        print(f"📋 Encontradas {len(contas)} contas ativas")
+        return contas
+    else:
+        if resp:
+            print(f"❌ Erro {resp.status_code}: {resp.text[:200]}")
+        else:
+            print("❌ Sem resposta do Supabase")
+        return []
 
 def get_account_balance(agent_id):
     """Consulta saldo da conta via proxy"""
+    if not PROXY_URL or not AUTO_APPROVE_SECRET:
+        return 0
+    
     try:
         url = f"{PROXY_URL}/wallet/balance"
         params = {"agent_id": agent_id, "secret": AUTO_APPROVE_SECRET}
@@ -84,7 +104,11 @@ def get_account_balance(agent_id):
 
 def debit_action(agent_id, action_type, target):
     """Debita o custo da ação da carteira do agente"""
-    cost = COSTOS.get(action_type, 1)
+    cost = CUSTOS.get(action_type, 1)
+    
+    if not PROXY_URL or not AUTO_APPROVE_SECRET:
+        return False, cost
+    
     try:
         url = f"{PROXY_URL}/wallet/pay"
         params = {
@@ -112,43 +136,49 @@ def register_action(agent_id, action_type, target, cost, success, error_msg=None
     }
     supabase_request("farming_actions", method="POST", data=data)
 
-def execute_action(agent_id, action_type, target):
+def execute_action_simulated(agent_id, action_type, target):
     """
-    Executa a ação real (simulação por enquanto)
-    TODO: Implementar com Playwright/Selenium para ações reais
+    Executa a ação simulada (substituir por Playwright depois)
     """
     # Simulação de delay aleatório (1-5 segundos)
     delay = random.uniform(1, 5)
+    print(f"      ⏳ Simulando {action_type} (delay {delay:.1f}s)...")
     time.sleep(delay)
     
     # Simular sucesso (95% de taxa de sucesso)
+    import random
     success_rate = 0.95
-    return random.random() < success_rate
-
-def update_daily_counter(agent_id):
-    """Atualiza contador diário de ações (opcional)"""
-    # Pode ser implementado se quiser controlar meta diária
-    pass
+    sucesso = random.random() < success_rate
+    
+    if sucesso:
+        print(f"      ✅ {action_type} simulado com sucesso!")
+    else:
+        print(f"      ❌ {action_type} simulado falhou!")
+    
+    return sucesso
 
 def process_account(account):
-    """Processa uma conta: executa ações pendentes"""
+    """Processa uma conta: executa ações"""
     agent_id = account["agent_id"]
     platform = account["platform"]
     daily_goal = account.get("daily_goal", 50)
     
-    print(f"\n📱 Processando conta: {agent_id} ({platform})")
+    print(f"\n{'='*50}")
+    print(f"📱 Processando conta: {agent_id}")
+    print(f"   Plataforma: {platform}")
     print(f"   Meta diária: {daily_goal} ações")
     
     # Verificar saldo atual
     balance = get_account_balance(agent_id)
-    print(f"   Saldo: R$ {balance/100:.2f}")
+    print(f"   💰 Saldo: R$ {balance/100:.2f}")
     
     if balance < 10:  # Menos que R$ 0,10
         print(f"   ⚠️ Saldo baixo! Considere recarregar a carteira.")
-        send_telegram_message(f"⚠️ *Alerta de saldo baixo*\n\nConta `{agent_id}` está com saldo R$ {balance/100:.2f}. Recarregue para continuar as ações.")
+        send_telegram_message(f"⚠️ *Alerta de saldo baixo*\n\nConta `{agent_id}` está com saldo R$ {balance/100:.2f}.\nRecarregue para continuar as ações.")
         return
     
     # Definir ações a executar (exemplo)
+    import random
     acoes = [
         {"type": "like", "target": f"https://instagram.com/p/exemplo_{random.randint(1,100)}"},
         {"type": "follow", "target": f"https://instagram.com/usuario_{random.randint(1,50)}"},
@@ -160,7 +190,7 @@ def process_account(account):
         action_type = acao["type"]
         target = acao["target"]
         
-        print(f"   🎬 Executando {action_type} em {target}...")
+        print(f"\n   🎬 Executando {action_type}...")
         
         # Debita o custo
         success_debit, cost = debit_action(agent_id, action_type, target)
@@ -170,25 +200,29 @@ def process_account(account):
             register_action(agent_id, action_type, target, cost, False, "Saldo ou limite insuficiente")
             break
         
-        # Executa ação real
-        success_action = execute_action(agent_id, action_type, target)
+        print(f"      💸 Débito de R$ {cost/100:.2f} realizado")
+        
+        # Executa ação simulada
+        success_action = execute_action_simulated(agent_id, action_type, target)
         
         if success_action:
-            print(f"      ✅ {action_type} concluído! (custo: R$ {cost/100:.2f})")
+            print(f"      ✅ {action_type} concluído!")
             register_action(agent_id, action_type, target, cost, True)
             actions_executed += 1
         else:
             print(f"      ❌ Falha na execução do {action_type}")
-            register_action(agent_id, action_type, target, cost, False, "Falha na execução")
+            register_action(agent_id, action_type, target, cost, False, "Falha na execução simulada")
         
         # Pausa entre ações para comportamento mais humano
-        time.sleep(random.uniform(3, 8))
+        pausa = random.uniform(3, 8)
+        print(f"      ⏱️ Aguardando {pausa:.1f}s...")
+        time.sleep(pausa)
     
-    print(f"   📊 Total de ações executadas: {actions_executed}")
+    print(f"\n   📊 Total de ações executadas: {actions_executed}")
     
     # Atualizar saldo final
     final_balance = get_account_balance(agent_id)
-    print(f"   Saldo final: R$ {final_balance/100:.2f}")
+    print(f"   💰 Saldo final: R$ {final_balance/100:.2f}")
 
 def main():
     print("="*50)
@@ -200,6 +234,7 @@ def main():
     # Verificar configurações
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         print("❌ Erro: Configuração do Supabase não encontrada.")
+        print("   Verifique o arquivo .env")
         sys.exit(1)
     
     if not AUTO_APPROVE_SECRET:
@@ -208,15 +243,14 @@ def main():
     
     # Buscar contas ativas
     accounts = get_active_accounts()
-    print(f"\n📋 Encontradas {len(accounts)} contas ativas")
     
     if not accounts:
-        print("Nenhuma conta ativa para processar.")
-        send_telegram_message("🌾 *Farming Worker*\n\nNenhuma conta ativa encontrada. Adicione contas com `/farming_add`.")
+        print("\n📭 Nenhuma conta ativa encontrada.")
+        print("   Adicione contas com o comando: /farming_add")
+        send_telegram_message("🌾 *Farming Worker*\n\nNenhuma conta ativa encontrada.\nAdicione contas com `/farming_add`.")
         return
     
     # Processar cada conta
-    total_actions = 0
     for account in accounts:
         process_account(account)
     
