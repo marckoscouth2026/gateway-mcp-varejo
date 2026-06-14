@@ -13,6 +13,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+AUTO_APPROVE_SECRET = os.getenv("AUTO_APPROVE_SECRET", "K:2dhYs;o8AN<.gXW-lV!'nHuDf*pJc5")
+PROXY_URL = os.getenv("PROXY_URL", "https://gateway-mcp-varejo.onrender.com")
 
 def send_message(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
