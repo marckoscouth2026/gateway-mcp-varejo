@@ -10,10 +10,13 @@ from playwright.sync_api import sync_playwright
 WORKSPACE_BASE = "/tmp/playwright_workspaces"
 
 # >>> SUBSTITUA PELOS DADOS DA SUA CONTA <<<
-ACCOUNTS = {
-    "teste_farming_01": {
-        "username": "testefarmingbot",      # ex: "testefarmingxyz123"
-        "password": "acesso2026"         # ex: "T3stF@rm2026!"
+
+  ACCOUNTS = {
+    "testefarm26": {                         # ← Esta é a chave que você vai usar no comando
+        "username": "testefarm26",
+        "password": "acesso2026"
+    }
+}
     }
 }
 
