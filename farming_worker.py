@@ -89,20 +89,28 @@ def get_active_accounts():
 def get_account_balance(agent_id):
     """Consulta saldo da conta via proxy"""
     if not PROXY_URL or not AUTO_APPROVE_SECRET:
+        print(f"❌ PROXY_URL ou AUTO_APPROVE_SECRET não configurados: PROXY_URL={PROXY_URL}, SECRET={AUTO_APPROVE_SECRET}")
         return 0
     
     try:
-        # Parâmetros na query string (como no curl)
+        # Constrói a URL igual ao teste manual
         url = f"{PROXY_URL}/wallet/balance?agent_id={agent_id}&secret={AUTO_APPROVE_SECRET}"
+        print(f"🔍 Consultando saldo: {url}")
+        
         resp = requests.post(url, timeout=30)
+        print(f"   Status: {resp.status_code}")
+        print(f"   Resposta: {resp.text}")
+        
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("balance", 0)
+            balance = data.get("balance", 0)
+            print(f"   Saldo interpretado: {balance}")
+            return balance
         else:
-            print(f"Erro ao consultar saldo: {resp.status_code} - {resp.text}")
+            print(f"   ❌ Erro HTTP {resp.status_code}")
             return 0
     except Exception as e:
-        print(f"Erro ao consultar saldo de {agent_id}: {e}")
+        print(f"   ❌ Exceção: {e}")
         return 0
 
 def debit_action(agent_id, action_type, target):
