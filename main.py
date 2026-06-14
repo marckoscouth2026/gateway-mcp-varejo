@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import FastAPI, Request HTTPException
+from fastapi import FastAPI, Request, HTTPException
 import os
 import requests
 from dotenv import load_dotenv
