@@ -1,0 +1,31 @@
+name: Farming Worker
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # Executa a cada hora (no minuto 0)
+  workflow_dispatch:        # Permite execução manual pela aba Actions
+
+jobs:
+  run-farming:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install requests python-dotenv
+
+      - name: Executar farming worker
+        run: python farming_worker.py
+        env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+          AUTO_APPROVE_SECRET: ${{ secrets.AUTO_APPROVE_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
