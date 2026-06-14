@@ -69,7 +69,98 @@ def admin_keyboard():
             [{"text": "🔙 VOLTAR", "callback_data": "voltar"}]
         ]
     }
+# ========== FUNÇÕES DE CARTEIRA ==========
+def supabase_request(endpoint: str, method: str = "GET", data: dict = None):
+    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}", "Content-Type": "application/json"}
+    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    try:
+        if method == "GET":
+            resp = requests.get(url, headers=headers)
+        elif method == "POST":
+            resp = requests.post(url, json=data, headers=headers)
+        elif method == "PATCH":
+            resp = requests.patch(url, json=data, headers=headers)
+        else:
+            return None
+        return resp
+    except Exception as e:
+        print(f"Erro Supabase: {e}")
+        return None
 
+def get_wallet(agent_id: str) -> dict | None:
+    resp = supabase_request(f"agent_wallets?agent_id=eq.{agent_id}")
+    if resp and resp.status_code == 200 and resp.json():
+        return resp.json()[0]
+    return None
+
+def create_wallet(agent_id: str):
+    default_wallet = {
+        "agent_id": agent_id,
+        "balance": 0,
+        "hourly_limit": 500,
+        "daily_limit": 5000,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat()
+    }
+    supabase_request("agent_wallets", method="POST", data=default_wallet)
+
+def update_wallet(agent_id: str, balance: int):
+    supabase_request(f"agent_wallets?agent_id=eq.{agent_id}", method="PATCH", data={"balance": balance, "updated_at": datetime.now().isoformat()})
+
+def log_transaction(agent_id: str, amount: int, description: str):
+    data = {"agent_id": agent_id, "amount": amount, "description": description, "created_at": datetime.now().isoformat()}
+    supabase_request("transactions", method="POST", data=data)
+
+# ========== ENDPOINTS DA CARTEIRA ==========
+@app.post("/wallet/balance")
+async def wallet_balance(agent_id: str, secret: str):
+    if secret != AUTO_APPROVE_SECRET:
+        raise HTTPException(403, "Secret inválido")
+    
+    wallet = get_wallet(agent_id)
+    if not wallet:
+        create_wallet(agent_id)
+        wallet = get_wallet(agent_id)
+    
+    return {"agent_id": agent_id, "balance": wallet["balance"], "hourly_limit": wallet["hourly_limit"], "daily_limit": wallet["daily_limit"]}
+
+@app.post("/wallet/deposit")
+async def wallet_deposit(agent_id: str, amount: int, secret: str):
+    if secret != AUTO_APPROVE_SECRET:
+        raise HTTPException(403, "Secret inválido")
+    if amount <= 0:
+        raise HTTPException(400, "Amount deve ser positivo")
+    
+    wallet = get_wallet(agent_id)
+    if not wallet:
+        create_wallet(agent_id)
+        wallet = get_wallet(agent_id)
+    
+    new_balance = wallet["balance"] + amount
+    update_wallet(agent_id, new_balance)
+    log_transaction(agent_id, amount, f"Depósito de R$ {amount/100:.2f}")
+    
+    return {"status": "deposited", "new_balance": new_balance}
+
+@app.post("/wallet/pay")
+async def wallet_pay(agent_id: str, amount: int, description: str, secret: str):
+    if secret != AUTO_APPROVE_SECRET:
+        raise HTTPException(403, "Secret inválido")
+    if amount <= 0:
+        raise HTTPException(400, "Amount deve ser positivo")
+    
+    wallet = get_wallet(agent_id)
+    if not wallet:
+        raise HTTPException(404, "Carteira não encontrada")
+    
+    new_balance = wallet["balance"] - amount
+    if new_balance < 0:
+        raise HTTPException(402, "Saldo insuficiente")
+    
+    update_wallet(agent_id, new_balance)
+    log_transaction(agent_id, -amount, description)
+    
+    return {"status": "approved", "new_balance": new_balance, "amount": amount, "description": description}
 @app.post("/telegram/webhook")
 async def webhook(request: Request):
     try:
