@@ -32,14 +32,15 @@ CUSTOS = {
 }
 
 # ========== FUNÇÕES DE SUPORTE ==========
-def send_telegram_message(text):
+def send_telegram_message(text, parse_mode="HTML"):
     """Envia mensagem para o Telegram (alertas)"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": parse_mode}
+        requests.post(url, json=payload, timeout=30)
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
@@ -86,29 +87,83 @@ def get_active_accounts():
             print("❌ Sem resposta do Supabase")
         return []
 
-def get_account_balance(agent_id):
-    """Consulta saldo da conta via proxy"""
-    if not PROXY_URL or not AUTO_APPROVE_SECRET:
-        print(f"❌ PROXY_URL ou AUTO_APPROVE_SECRET não configurados: PROXY_URL={PROXY_URL}, SECRET={AUTO_APPROVE_SECRET}")
-        return 0
+def process_account(account):
+    agent_id = account["agent_id"]
+    platform = account["platform"]
+    daily_goal = account.get("daily_goal", 50)
     
-    try:
-        url = f"{PROXY_URL}/wallet/balance?agent_id={agent_id}&secret={AUTO_APPROVE_SECRET}"
-        print(f"🔍 Consultando saldo: {url}")
-        resp = requests.post(url, timeout=30)
-        print(f"   Status: {resp.status_code}")
-        print(f"   Resposta: {resp.text}")
-        if resp.status_code == 200:
-            data = resp.json()
-            balance = data.get("balance", 0)
-            print(f"   Saldo interpretado: {balance}")
-            return balance
+    print(f"\n{'='*50}")
+    print(f"📱 Processando conta: {agent_id}")
+    print(f"   Plataforma: {platform}")
+    print(f"   Meta diária: {daily_goal} ações")
+    
+    balance_antes = get_account_balance(agent_id)
+    print(f"   💰 Saldo: R$ {balance_antes/100:.2f}")
+    
+    if balance_antes < 10:
+        print(f"   ⚠️ Saldo baixo! Considere recarregar a carteira.")
+        send_telegram_message(f"⚠️ *Alerta de saldo baixo*\n\nConta `{agent_id}` está com saldo R$ {balance_antes/100:.2f}. Recarregue para continuar as ações.")
+        return
+    
+    acoes = [
+        {"type": "like", "target": f"https://instagram.com/p/exemplo_{random.randint(1,100)}"},
+        {"type": "follow", "target": f"https://instagram.com/usuario_{random.randint(1,50)}"},
+        {"type": "like", "target": f"https://instagram.com/p/exemplo2_{random.randint(1,100)}"},
+    ]
+    
+    actions_executed = 0
+    custo_total = 0
+    detalhes = []
+    
+    for acao in acoes:
+        action_type = acao["type"]
+        target = acao["target"]
+        cost = CUSTOS.get(action_type, 1)
+        
+        print(f"\n   🎬 Executando {action_type}...")
+        
+        # Debita
+        success_debit, cost = debit_action(agent_id, action_type, target)
+        if not success_debit:
+            print(f"      ❌ Falha no débito")
+            register_action(agent_id, action_type, target, cost, False, "Saldo/limite insuficiente")
+            break
+        
+        print(f"      💸 Débito de R$ {cost/100:.2f} realizado")
+        custo_total += cost
+        
+        # Executa ação simulada
+        success_action = execute_action_simulated(agent_id, action_type, target)
+        if success_action:
+            register_action(agent_id, action_type, target, cost, True)
+            actions_executed += 1
+            detalhes.append(f"✅ {action_type}: R$ {cost/100:.2f}")
         else:
-            print(f"   ❌ Erro HTTP {resp.status_code}")
-            return 0
-    except Exception as e:
-        print(f"   ❌ Exceção: {e}")
-        return 0
+            register_action(agent_id, action_type, target, cost, False, "Falha na execução")
+            detalhes.append(f"❌ {action_type}: falhou")
+        
+        pausa = random.uniform(3, 8)
+        print(f"      ⏱️ Aguardando {pausa:.1f}s...")
+        time.sleep(pausa)
+    
+    final_balance = get_account_balance(agent_id)
+    print(f"\n   📊 Total de ações executadas: {actions_executed}")
+    print(f"   💰 Saldo final: R$ {final_balance/100:.2f}")
+    
+    # Envia resumo detalhado para o Telegram
+    if actions_executed > 0:
+        resumo = (
+            f"🌾 *Farming Worker - Execução concluída*\n\n"
+            f"📱 Conta: `{agent_id}`\n"
+            f"✅ Ações executadas: {actions_executed}\n"
+            f"💰 Custo total: R$ {custo_total/100:.2f}\n"
+            f"📊 Saldo anterior: R$ {balance_antes/100:.2f}\n"
+            f"💳 Saldo atual: R$ {final_balance/100:.2f}\n"
+            f"📝 Detalhes:\n" + "\n".join(detalhes)
+        )
+        send_telegram_message(resumo)
+    else:
+        send_telegram_message(f"⚠️ Nenhuma ação executada para `{agent_id}`. Verifique saldo ou limite.")
         
 def debit_action(agent_id, action_type, target):
     """Debita o custo da ação da carteira do agente"""
