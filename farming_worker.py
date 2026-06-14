@@ -92,12 +92,14 @@ def get_account_balance(agent_id):
         return 0
     
     try:
-        url = f"{PROXY_URL}/wallet/balance"
-        params = {"agent_id": agent_id, "secret": AUTO_APPROVE_SECRET}
-        resp = requests.get(url, params=params, timeout=30)
+        # Parâmetros vão na QUERY STRING (URL)
+        url = f"{PROXY_URL}/wallet/balance?agent_id={agent_id}&secret={AUTO_APPROVE_SECRET}"
+        resp = requests.get(url, timeout=30)
         if resp.status_code == 200:
             return resp.json().get("balance", 0)
-        return 0
+        else:
+            print(f"Erro ao consultar saldo: {resp.status_code} - {resp.text}")
+            return 0
     except Exception as e:
         print(f"Erro ao consultar saldo de {agent_id}: {e}")
         return 0
@@ -110,19 +112,21 @@ def debit_action(agent_id, action_type, target):
         return False, cost
     
     try:
-        url = f"{PROXY_URL}/wallet/pay"
-        params = {
-            "agent_id": agent_id,
-            "amount": cost,
-            "description": f"{action_type} em {target}",
-            "secret": AUTO_APPROVE_SECRET
-        }
-        resp = requests.post(url, params=params, timeout=30)
-        return resp.status_code == 200, cost
+        # Parâmetros vão na QUERY STRING (URL)
+        url = f"{PROXY_URL}/wallet/pay?agent_id={agent_id}&amount={cost}&description={action_type}+em+{target}&secret={AUTO_APPROVE_SECRET}"
+        resp = requests.post(url, timeout=30)
+        if resp.status_code == 200:
+            print(f"      💸 Débito de R$ {cost/100:.2f} realizado")
+            return True, cost
+        elif resp.status_code == 402:
+            print(f"      ❌ Saldo insuficiente para debitar R$ {cost/100:.2f}")
+            return False, cost
+        else:
+            print(f"      ❌ Erro no débito: {resp.status_code} - {resp.text}")
+            return False, cost
     except Exception as e:
-        print(f"Erro ao debitar {agent_id}: {e}")
+        print(f"      ❌ Exceção no débito: {e}")
         return False, cost
-
 def register_action(agent_id, action_type, target, cost, success, error_msg=None):
     """Registra a ação na tabela farming_actions"""
     data = {
