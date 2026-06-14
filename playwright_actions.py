@@ -19,8 +19,8 @@ WORKSPACE_BASE = "/tmp/playwright_workspaces"  # Pasta onde os perfis serão sal
 # Exemplo: ACCOUNTS = {"insta_conta_01": {"username": "user", "password": "pass"}}
 ACCOUNTS = {
     "teste_farming_01": {
-        "username": "SEU_USUARIO",
-        "password": "SUA_SENHA"
+        "username": "Teste Farming Bot",
+        "password": "acesso2026"
     }
 }
 
