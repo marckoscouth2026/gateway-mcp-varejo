@@ -71,6 +71,29 @@ def supabase_request(endpoint, method="GET", data=None, params=None):
         print(f"Erro Supabase: {e}")
         return None
 
+def get_account_balance(agent_id):
+    """Consulta saldo da conta via proxy"""
+    if not PROXY_URL or not AUTO_APPROVE_SECRET:
+        print("❌ PROXY_URL ou AUTO_APPROVE_SECRET não configurados")
+        return 0
+    
+    try:
+        url = f"{PROXY_URL}/wallet/balance?agent_id={agent_id}&secret={AUTO_APPROVE_SECRET}"
+        print(f"🔍 Consultando saldo: {url.replace(AUTO_APPROVE_SECRET, '***')}")
+        resp = requests.post(url, timeout=30)
+        print(f"   Status: {resp.status_code}")
+        print(f"   Resposta: {resp.text}")
+        if resp.status_code == 200:
+            data = resp.json()
+            balance = data.get("balance", 0)
+            print(f"   Saldo interpretado: {balance}")
+            return balance
+        else:
+            return 0
+    except Exception as e:
+        print(f"   ❌ Erro: {e}")
+        return 0
+
 def get_active_accounts():
     """Busca contas ativas para processamento"""
     print("🔍 Buscando contas ativas...")
@@ -87,7 +110,61 @@ def get_active_accounts():
             print("❌ Sem resposta do Supabase")
         return []
 
+def debit_action(agent_id, action_type, target):
+    """Debita o custo da ação da carteira do agente"""
+    cost = CUSTOS.get(action_type, 1)
+    
+    if not PROXY_URL or not AUTO_APPROVE_SECRET:
+        return False, cost
+    
+    try:
+        url = f"{PROXY_URL}/wallet/pay?agent_id={agent_id}&amount={cost}&description={action_type}+em+{target}&secret={AUTO_APPROVE_SECRET}"
+        resp = requests.post(url, timeout=30)
+        if resp.status_code == 200:
+            print(f"      💸 Débito de R$ {cost/100:.2f} realizado")
+            return True, cost
+        elif resp.status_code == 402:
+            print(f"      ❌ Saldo insuficiente para debitar R$ {cost/100:.2f}")
+            return False, cost
+        else:
+            print(f"      ❌ Erro no débito: {resp.status_code} - {resp.text}")
+            return False, cost
+    except Exception as e:
+        print(f"      ❌ Exceção no débito: {e}")
+        return False, cost
+
+def register_action(agent_id, action_type, target, cost, success, error_msg=None):
+    """Registra a ação na tabela farming_actions"""
+    data = {
+        "agent_id": agent_id,
+        "action_type": action_type,
+        "target": target,
+        "cost_cents": cost,
+        "status": "success" if success else "failed",
+        "error_message": error_msg,
+        "completed_at": datetime.now().isoformat() if success else None
+    }
+    supabase_request("farming_actions", method="POST", data=data)
+
+def execute_action_simulated(agent_id, action_type, target):
+    """
+    Executa a ação simulada (substituir por Playwright depois)
+    """
+    delay = random.uniform(1, 5)
+    print(f"      ⏳ Simulando {action_type} (delay {delay:.1f}s)...")
+    time.sleep(delay)
+    
+    # Simular sucesso (95% de taxa de sucesso)
+    sucesso = random.random() < 0.95
+    if sucesso:
+        print(f"      ✅ {action_type} simulado com sucesso!")
+    else:
+        print(f"      ❌ {action_type} simulado falhou!")
+    
+    return sucesso
+
 def process_account(account):
+    """Processa uma conta: executa ações e envia resumo detalhado"""
     agent_id = account["agent_id"]
     platform = account["platform"]
     daily_goal = account.get("daily_goal", 50)
@@ -139,7 +216,7 @@ def process_account(account):
             actions_executed += 1
             detalhes.append(f"✅ {action_type}: R$ {cost/100:.2f}")
         else:
-            register_action(agent_id, action_type, target, cost, False, "Falha na execução")
+            register_action(agent_id, action_type, target, cost, False, "Falha na execução simulada")
             detalhes.append(f"❌ {action_type}: falhou")
         
         pausa = random.uniform(3, 8)
@@ -164,130 +241,6 @@ def process_account(account):
         send_telegram_message(resumo)
     else:
         send_telegram_message(f"⚠️ Nenhuma ação executada para `{agent_id}`. Verifique saldo ou limite.")
-        
-def debit_action(agent_id, action_type, target):
-    """Debita o custo da ação da carteira do agente"""
-    cost = CUSTOS.get(action_type, 1)
-    
-    if not PROXY_URL or not AUTO_APPROVE_SECRET:
-        return False, cost
-    
-    try:
-        # Parâmetros vão na QUERY STRING (URL)
-        url = f"{PROXY_URL}/wallet/pay?agent_id={agent_id}&amount={cost}&description={action_type}+em+{target}&secret={AUTO_APPROVE_SECRET}"
-        resp = requests.post(url, timeout=30)
-        if resp.status_code == 200:
-            print(f"      💸 Débito de R$ {cost/100:.2f} realizado")
-            return True, cost
-        elif resp.status_code == 402:
-            print(f"      ❌ Saldo insuficiente para debitar R$ {cost/100:.2f}")
-            return False, cost
-        else:
-            print(f"      ❌ Erro no débito: {resp.status_code} - {resp.text}")
-            return False, cost
-    except Exception as e:
-        print(f"      ❌ Exceção no débito: {e}")
-        return False, cost
-def register_action(agent_id, action_type, target, cost, success, error_msg=None):
-    """Registra a ação na tabela farming_actions"""
-    data = {
-        "agent_id": agent_id,
-        "action_type": action_type,
-        "target": target,
-        "cost_cents": cost,
-        "status": "success" if success else "failed",
-        "error_message": error_msg,
-        "completed_at": datetime.now().isoformat() if success else None
-    }
-    supabase_request("farming_actions", method="POST", data=data)
-
-def execute_action_simulated(agent_id, action_type, target):
-    """
-    Executa a ação simulada (substituir por Playwright depois)
-    """
-    import random  # import local para garantir
-    # Simulação de delay aleatório (1-5 segundos)
-    delay = random.uniform(1, 5)
-    print(f"      ⏳ Simulando {action_type} (delay {delay:.1f}s)...")
-    time.sleep(delay)
-    
-    # Simular sucesso (95% de taxa de sucesso)
-    success_rate = 0.95
-    sucesso = random.random() < success_rate
-    
-    if sucesso:
-        print(f"      ✅ {action_type} simulado com sucesso!")
-    else:
-        print(f"      ❌ {action_type} simulado falhou!")
-    
-    return sucesso
-    
-def process_account(account):
-    """Processa uma conta: executa ações"""
-    agent_id = account["agent_id"]
-    platform = account["platform"]
-    daily_goal = account.get("daily_goal", 50)
-    
-    print(f"\n{'='*50}")
-    print(f"📱 Processando conta: {agent_id}")
-    print(f"   Plataforma: {platform}")
-    print(f"   Meta diária: {daily_goal} ações")
-    
-    # Verificar saldo atual
-    balance = get_account_balance(agent_id)
-    print(f"   💰 Saldo: R$ {balance/100:.2f}")
-    
-    if balance < 10:  # Menos que R$ 0,10
-        print(f"   ⚠️ Saldo baixo! Considere recarregar a carteira.")
-        send_telegram_message(f"⚠️ *Alerta de saldo baixo*\n\nConta `{agent_id}` está com saldo R$ {balance/100:.2f}.\nRecarregue para continuar as ações.")
-        return
-    
-    # Definir ações a executar (exemplo)
-    import random
-    acoes = [
-        {"type": "like", "target": f"https://instagram.com/p/exemplo_{random.randint(1,100)}"},
-        {"type": "follow", "target": f"https://instagram.com/usuario_{random.randint(1,50)}"},
-        {"type": "like", "target": f"https://instagram.com/p/exemplo2_{random.randint(1,100)}"},
-    ]
-    
-    actions_executed = 0
-    for acao in acoes:
-        action_type = acao["type"]
-        target = acao["target"]
-        
-        print(f"\n   🎬 Executando {action_type}...")
-        
-        # Debita o custo
-        success_debit, cost = debit_action(agent_id, action_type, target)
-        
-        if not success_debit:
-            print(f"      ❌ Falha no débito (saldo ou limite insuficiente)")
-            register_action(agent_id, action_type, target, cost, False, "Saldo ou limite insuficiente")
-            break
-        
-        print(f"      💸 Débito de R$ {cost/100:.2f} realizado")
-        
-        # Executa ação simulada
-        success_action = execute_action_simulated(agent_id, action_type, target)
-        
-        if success_action:
-            print(f"      ✅ {action_type} concluído!")
-            register_action(agent_id, action_type, target, cost, True)
-            actions_executed += 1
-        else:
-            print(f"      ❌ Falha na execução do {action_type}")
-            register_action(agent_id, action_type, target, cost, False, "Falha na execução simulada")
-        
-        # Pausa entre ações para comportamento mais humano
-        pausa = random.uniform(3, 8)
-        print(f"      ⏱️ Aguardando {pausa:.1f}s...")
-        time.sleep(pausa)
-    
-    print(f"\n   📊 Total de ações executadas: {actions_executed}")
-    
-    # Atualizar saldo final
-    final_balance = get_account_balance(agent_id)
-    print(f"   💰 Saldo final: R$ {final_balance/100:.2f}")
 
 def main():
     print("="*50)
@@ -323,9 +276,8 @@ def main():
     print("\n" + "="*50)
     print("✅ Farming Worker concluído!")
     
-    # Enviar resumo para o Telegram
-    resumo = f"🌾 *Farming Worker*\n\n✅ Execução concluída\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📋 Contas processadas: {len(accounts)}"
-    send_telegram_message(resumo)
+    # Enviar resumo simples para o Telegram (opcional, pois cada conta já enviou detalhes)
+    send_telegram_message(f"🌾 *Farming Worker*\n\n✅ Execução concluída\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📋 Contas processadas: {len(accounts)}")
 
 if __name__ == "__main__":
     main()
