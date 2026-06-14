@@ -12,8 +12,8 @@ WORKSPACE_BASE = "/tmp/playwright_workspaces"
 # >>> SUBSTITUA PELOS DADOS DA SUA CONTA <<<
 ACCOUNTS = {
     "teste_farming_01": {
-        "username": "SEU_USUARIO",      # ex: "testefarmingxyz123"
-        "password": "SUA_SENHA"         # ex: "T3stF@rm2026!"
+        "username": "Teste Farming Bot",      # ex: "testefarmingxyz123"
+        "password": "acesso2026"         # ex: "T3stF@rm2026!"
     }
 }
 
