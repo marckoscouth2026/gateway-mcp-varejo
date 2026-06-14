@@ -93,14 +93,11 @@ def get_account_balance(agent_id):
         return 0
     
     try:
-        # Constrói a URL igual ao teste manual
         url = f"{PROXY_URL}/wallet/balance?agent_id={agent_id}&secret={AUTO_APPROVE_SECRET}"
         print(f"🔍 Consultando saldo: {url}")
-        
         resp = requests.post(url, timeout=30)
         print(f"   Status: {resp.status_code}")
         print(f"   Resposta: {resp.text}")
-        
         if resp.status_code == 200:
             data = resp.json()
             balance = data.get("balance", 0)
@@ -112,7 +109,7 @@ def get_account_balance(agent_id):
     except Exception as e:
         print(f"   ❌ Exceção: {e}")
         return 0
-
+        
 def debit_action(agent_id, action_type, target):
     """Debita o custo da ação da carteira do agente"""
     cost = CUSTOS.get(action_type, 1)
