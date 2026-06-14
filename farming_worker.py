@@ -32,17 +32,24 @@ CUSTOS = {
 }
 
 # ========== FUNÇÕES DE SUPORTE ==========
+
 def send_telegram_message(text, parse_mode="HTML"):
-    """Envia mensagem para o Telegram (alertas)"""
+    print(f"📤 [DEBUG] send_telegram_message chamada. Tamanho: {len(text)}")
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Telegram não configurado")
+        print("⚠️ [DEBUG] Telegram não configurado: token ou chat_id ausentes")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": parse_mode}
     try:
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": parse_mode}
-        requests.post(url, json=payload, timeout=30)
+        print(f"📡 [DEBUG] Enviando para chat_id={TELEGRAM_CHAT_ID}")
+        resp = requests.post(url, json=payload, timeout=30)
+        print(f"   Status: {resp.status_code}")
+        if resp.status_code != 200:
+            print(f"   Erro: {resp.text}")
+        else:
+            print(f"✅ [DEBUG] Mensagem enviada com sucesso")
     except Exception as e:
-        print(f"Erro ao enviar mensagem: {e}")
+        print(f"❌ [DEBUG] Exceção: {e}")
 
 def supabase_request(endpoint, method="GET", data=None, params=None):
     """Faz requisição ao Supabase com headers corretos"""
@@ -241,6 +248,14 @@ def process_account(account):
         send_telegram_message(resumo)
     else:
         send_telegram_message(f"⚠️ Nenhuma ação executada para `{agent_id}`. Verifique saldo ou limite.")
+        print(f"📤 [DEBUG] Preparando resumo detalhado...")
+if actions_executed > 0:
+    resumo = (...)
+    print(f"📤 [DEBUG] Chamando send_telegram_message para resumo detalhado")
+    send_telegram_message(resumo)
+else:
+    print(f"⚠️ [DEBUG] Nenhuma ação executada, enviando alerta")
+    send_telegram_message(...)
 
 def main():
     print("="*50)
@@ -277,7 +292,7 @@ def main():
     print("✅ Farming Worker concluído!")
     
     # Enviar resumo simples para o Telegram (opcional, pois cada conta já enviou detalhes)
-    send_telegram_message(f"🌾 *Farming Worker*\n\n✅ Execução concluída\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📋 Contas processadas: {len(accounts)}")
+    # send_telegram_message(f"🌾 *Farming Worker*\n\n✅ Execução concluída\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📋 Contas processadas: {len(accounts)}")
 
 if __name__ == "__main__":
     main()
