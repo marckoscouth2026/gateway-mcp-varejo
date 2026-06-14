@@ -42,6 +42,8 @@ def save_cookies(context, account_id):
 def login(page, account_id, username, password):
     print(f"🔑 Fazendo login para {account_id}...")
     page.goto("https://www.instagram.com/accounts/login/")
+    page.screenshot(path="login_step.png")
+    print("📸 Screenshot salvo como login_step.png")
     time.sleep(random.uniform(2, 4))
     page.fill("input[name='username']", username, timeout=10000)
     page.fill("input[name='password']", password, timeout=10000)
