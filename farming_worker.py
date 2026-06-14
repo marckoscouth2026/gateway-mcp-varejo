@@ -150,13 +150,13 @@ def execute_action_simulated(agent_id, action_type, target):
     """
     Executa a ação simulada (substituir por Playwright depois)
     """
+    import random  # import local para garantir
     # Simulação de delay aleatório (1-5 segundos)
     delay = random.uniform(1, 5)
     print(f"      ⏳ Simulando {action_type} (delay {delay:.1f}s)...")
     time.sleep(delay)
     
     # Simular sucesso (95% de taxa de sucesso)
-    import random
     success_rate = 0.95
     sucesso = random.random() < success_rate
     
@@ -166,7 +166,7 @@ def execute_action_simulated(agent_id, action_type, target):
         print(f"      ❌ {action_type} simulado falhou!")
     
     return sucesso
-
+    
 def process_account(account):
     """Processa uma conta: executa ações"""
     agent_id = account["agent_id"]
