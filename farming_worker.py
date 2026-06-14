@@ -92,11 +92,12 @@ def get_account_balance(agent_id):
         return 0
     
     try:
-        # Parâmetros vão na QUERY STRING (URL)
+        # Parâmetros na query string (como no curl)
         url = f"{PROXY_URL}/wallet/balance?agent_id={agent_id}&secret={AUTO_APPROVE_SECRET}"
-        resp = requests.get(url, timeout=30)
+        resp = requests.post(url, timeout=30)
         if resp.status_code == 200:
-            return resp.json().get("balance", 0)
+            data = resp.json()
+            return data.get("balance", 0)
         else:
             print(f"Erro ao consultar saldo: {resp.status_code} - {resp.text}")
             return 0
